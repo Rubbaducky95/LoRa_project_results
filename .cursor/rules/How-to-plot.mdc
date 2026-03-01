@@ -1,0 +1,12 @@
+---
+description: 
+alwaysApply: true
+---
+
+- The plots need to fit inside a conference paper format, so either they are as wide as 1 column or both columns in the paper (documentclass: conference, IEEEtran, LaTeX)
+- All text in the plots need to be the same size as text in the paper, so make sure all text have same size
+- Text need to be in LaTex fontstyle
+- Plots need to be clear and visible: thick lines and dots, no small textures
+- No titels inside the plots, they will be written above the figure in latex instead
+- Always use kHz when plotting with bandwidth
+- Always specify the unit for the axis

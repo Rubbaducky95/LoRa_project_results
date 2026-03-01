@@ -1,0 +1,3 @@
+timestamp,rssi,kalman_rssi,sma_rssi,time_between_messages_ms,payload
+2025-12-11T19:56:14.202379,-61.0,-55.8831,-55.4,,CFG sf=11 sbw=62500 tp=12
+2025-12-11T19:56:29.355831,-50.0,-55.2948,-56.4,15153,"4076362,100,8,CD,CD,FF,40,85,88,A0,41"

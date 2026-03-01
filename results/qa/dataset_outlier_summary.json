@@ -1,0 +1,12 @@
+﻿{
+  "root": "C:\\Users\\ruben\\Documents\\LoRa Project\\raw_dataset",
+  "files_scanned": 1008,
+  "files_with_outliers": 249,
+  "outlier_count": 1197,
+  "outliers_by_type": {
+    "payload_invalid": 900,
+    "rssi_outlier": 13,
+    "tx_interval_outlier": 284
+  },
+  "report_csv": "C:\\Users\\ruben\\Documents\\LoRa Project\\results\\qa\\dataset_outlier_report.csv"
+}

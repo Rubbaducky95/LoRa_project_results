@@ -1,0 +1,4 @@
+tx_power,voltage,min_current,max_current
+2,3.3,0.060,0.090
+12,3.3,0.080,0.120
+22,3.3,0.160,0.180

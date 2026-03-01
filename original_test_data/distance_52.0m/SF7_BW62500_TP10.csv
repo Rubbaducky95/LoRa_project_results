@@ -1,0 +1,2 @@
+timestamp,rssi,kalman_rssi,sma_rssi,time_between_messages_ms,payload
+2026-01-31T16:50:40.958260,-67.0,-67.7919,-67.8,,CFG sf=7 sbw=62500 tp=10 seq=63 crc=E20F
