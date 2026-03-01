@@ -15,8 +15,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-WORKSPACE = r"C:\Users\ruben\Documents\LoRa Project"
-DATA_ROOT = os.path.join(WORKSPACE, "raw_test_data")
+# Use script-relative path so it works regardless of workspace location
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_WORKSPACE_DEFAULT = r"C:\Users\ruben\Documents\LoRa Project"
+_WORKSPACE_FALLBACK = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", ".."))
+_DATA_ROOT_DEFAULT = os.path.join(_WORKSPACE_DEFAULT, "raw_test_data")
+_DATA_ROOT_FALLBACK = os.path.join(_WORKSPACE_FALLBACK, "raw_test_data")
+if os.path.isdir(_DATA_ROOT_DEFAULT):
+    WORKSPACE = _WORKSPACE_DEFAULT
+    DATA_ROOT = _DATA_ROOT_DEFAULT
+else:
+    WORKSPACE = _WORKSPACE_FALLBACK
+    DATA_ROOT = _DATA_ROOT_FALLBACK
 
 BW_VALUES = [62500, 125000, 250000, 500000]
 TP_VALUES = [2, 12, 22]

@@ -10,3 +10,4 @@ alwaysApply: true
 - No titels inside the plots, they will be written above the figure in latex instead
 - Always use kHz when plotting with bandwidth
 - Always specify the unit for the axis
+- Figure size – Set to 7.16" × 4" (IEEE double-column width).
