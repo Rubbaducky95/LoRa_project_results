@@ -849,7 +849,7 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
     """Combined PER heatmap with annotated SF/BW config regions showing performance-energy patterns."""
     print(f"Rendering combined heatmap{suffix}...")
     fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0)
     ax = fig.add_subplot(gs[0])
     ax.set_facecolor(BG_DARK)
     for spine in ax.spines.values():
@@ -912,10 +912,10 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
             
             
             if idx < 3:
-                x_label = ts_c + (t_max - t_min) * 0.012
+                x_label = ts_c + (t_max - t_min) * 0.028
                 if idx < 1:
-                    x_label = ts_c + (t_max - t_min) * 0.012
-                y_label = e_max - e_range * 0.2
+                    x_label = ts_c + (t_max - t_min) * 0.010
+                y_label = e_max - e_range * 0.13
             else:
                 x_label = ts_c + (t_max - t_min) * 0.012
                 y_label = e_max - e_range * 0.09
@@ -936,11 +936,15 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                     # PER % — vertical for first two SFs, horizontal for the rest
                     y_per = e_max - e_range*0.015
                     if idx < 3:
-                        sub = ax.text(x_label, y_per - e_range*0.15, f"{per_val:.1f}%", ha="left", va="top",
+                        sub = ax.text(x_label, y_per - e_range*0.09, f"{per_val:.1f}", ha="left", va="top",
                                      fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                                      rotation=90, rotation_mode="anchor")
+                    elif idx == 5:
+                        sub = ax.text(x_label, y_per, f"{per_val:.1f} (%)", ha="left", va="top",
+                                     fontsize=IEEE_FONTSIZE, color="black", zorder=6,
+                                     rotation=0, rotation_mode="anchor")
                     else:
-                        sub = ax.text(x_label, y_per, f"{per_val:.1f}%", ha="left", va="top",
+                        sub = ax.text(x_label, y_per, f"{per_val:.1f}", ha="left", va="top",
                                      fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                                      rotation=0, rotation_mode="anchor")
                     sub.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
@@ -991,7 +995,7 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
     """BW transitions: one color-to-black cmap per BW, annotated BW region bands with SF separators."""
     print(f"Rendering BW transition heatmap{output_suffix}...")
     fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.0014)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0.0)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1103,7 +1107,7 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
     """SF transitions: one color-to-black cmap per SF, annotated SF region bands with BW separators and PER stats."""
     print(f"Rendering SF transition heatmap{output_suffix}...")
     fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.0014)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0.0)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1211,8 +1215,8 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
 def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
     """TP transitions: one color-to-black cmap per TP, annotated SF region bands with BW separators."""
     print(f"Rendering TP transition heatmap{output_suffix}...")
-    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.0014)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0.0)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
