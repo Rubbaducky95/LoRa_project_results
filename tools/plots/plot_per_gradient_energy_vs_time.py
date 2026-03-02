@@ -17,6 +17,7 @@ from matplotlib.colors import LogNorm, Normalize
 from matplotlib.gridspec import GridSpec
 from matplotlib import patheffects
 from matplotlib.text import Text
+from matplotlib.transforms import blended_transform_factory
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -342,8 +343,8 @@ def _legend_values_and_labels(param_type):
     return [], []
 
 
-def _add_config_switch_legend(ax, include_params, plot_param=None, use_markers=False):
-    """Simple legend: mapping for visible params only (vertical layout for SF plot)."""
+def _add_config_switch_legend(ax, include_params, plot_param=None, use_markers=False, horizontal=False):
+    """Simple legend: mapping for visible params only (vertical layout for SF plot, horizontal for combined)."""
     if not include_params:
         return
     order = ["sf", "bw", "tp"]
@@ -388,15 +389,17 @@ def _add_config_switch_legend(ax, include_params, plot_param=None, use_markers=F
     else:
         handles = [Line2D([0], [0], linestyle="", marker="", markersize=0) for _ in ordered]
         labels = [mapping[p] for p in ordered]
-    ncol = 2 if plot_param in ("tp", "bw") else (1 if plot_param in ("sf", "combined") else len(ordered))
+    ncol = 3 if horizontal else (2 if plot_param in ("tp", "bw") else (1 if plot_param in ("sf", "combined") else len(ordered)))
     hlen = 0.6 if (use_markers and plot_param in ("tp", "bw", "sf")) else (1.0 if use_markers else 0)
-    leg_fontsize = 9
-    leg_kw = dict(fontsize=leg_fontsize, handlelength=hlen, handletextpad=0.5, ncol=ncol,
-                  borderaxespad=0.1, borderpad=0.3)
+    leg_fontsize = 8 if horizontal else 9
+    leg_kw = dict(fontsize=leg_fontsize, handlelength=hlen, handletextpad=0.3, ncol=ncol,
+                  borderaxespad=0.1, borderpad=0.2)
     if plot_param in ("tp", "bw"):
         leg_kw["columnspacing"] = 0.5
         leg_kw["handletextpad"] = 0.2
-    ax.legend(handles=handles, labels=labels, loc="upper left", bbox_to_anchor=(0, 1), **leg_kw)
+    loc = "upper center" if horizontal else "upper left"
+    bbox = (0.5, 0.98) if horizontal else (0, 1)
+    ax.legend(handles=handles, labels=labels, loc=loc, bbox_to_anchor=bbox, **leg_kw)
 
 
 def _read_packets_with_tinit(path, payload_is_valid_fn):
@@ -567,6 +570,7 @@ def build_heatmap_matrix_per_packet(pts, time_bins, energy_bins):
 
 def main():
     setup_plot_style()
+    print("Starting energy-vs-time v3 plot generation...")
     # Override for IEEEtran: uniform 10pt text everywhere (legend, axes, ticks, colorbar, etc.)
     plt.rcParams.update({
         "font.size": IEEE_FONTSIZE,
@@ -580,7 +584,7 @@ def main():
         "axes.unicode_minus": False,
     })
     config_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots")
-    version = "v2"
+    version = "v3"
     output_dir = os.path.join(config_dir, "energy_vs_time", version)
     os.makedirs(output_dir, exist_ok=True)
     filters = []
@@ -594,6 +598,7 @@ def main():
     if not pts:
         print("No data found.")
         return
+    print(f"Collected {len(pts):,} packet points.")
 
     all_times = [p[0] for p in pts]
     all_energies = [p[1] for p in pts]
@@ -612,36 +617,27 @@ def main():
     log_vmin = 0.01  # avoid log(0)
 
     mat = build_heatmap_matrix_per_packet(pts, time_bins, energy_bins)
+    print("Built combined heatmap matrix.")
 
-    plot_combined_heatmap(output_dir, config_dir, DATA_ROOT, filters, time_bins, energy_bins, mat, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, cmap, suffix=f"_{version}")
+    plot_combined_heatmap(output_dir, config_dir, DATA_ROOT, filters, time_bins, energy_bins, mat, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, cmap, suffix=f"_{version}", pts=pts)
 
-    # Focused plot: zoom to specified energy and time thresholds
-    focus_time_min, focus_time_max = 30, 90   # min
-    focus_energy_min, focus_energy_max = 50, 150  # mJ
-    pts_focus = [(t, e, l) for t, e, l in pts if focus_time_min <= t <= focus_time_max and focus_energy_min <= e <= focus_energy_max]
-    if pts_focus:
-        time_bins_focus = np.linspace(focus_time_min, focus_time_max, n_time_bins + 1)
-        energy_bins_focus = np.linspace(focus_energy_min, focus_energy_max, n_energy_bins + 1)
-        mat_focus = build_heatmap_matrix_per_packet(pts_focus, time_bins_focus, energy_bins_focus)
-        plot_combined_heatmap(output_dir, config_dir, DATA_ROOT, filters, time_bins_focus, energy_bins_focus, mat_focus,
-                             focus_time_min, focus_time_max, focus_energy_min, focus_energy_max,
-                             vmin, vmax, log_vmin, cmap, suffix=f"_focused_{version}")
+    # Focused plot skipped for now
 
-    # Param transitions: one color-to-black cmap per value (BW 62.5, 125, etc.)
+    # Param transitions
     plot_param_transitions_bw(
         output_dir, config_dir, DATA_ROOT, filters, time_bins, energy_bins,
         t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_heatmap_matrix_per_packet,
-        mat_combined=mat, output_suffix=f"_{version}",
+        mat_combined=mat, output_suffix=f"_{version}", pts=pts,
     )
     plot_param_transitions_sf(
         output_dir, config_dir, DATA_ROOT, filters, time_bins, energy_bins,
         t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_heatmap_matrix_per_packet,
-        mat_combined=mat, output_suffix=f"_{version}",
+        mat_combined=mat, output_suffix=f"_{version}", pts=pts,
     )
     plot_param_transitions_tp(
         output_dir, config_dir, DATA_ROOT, filters, time_bins, energy_bins,
         t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_heatmap_matrix_per_packet,
-        mat_combined=mat, output_suffix=f"_{version}",
+        mat_combined=mat, output_suffix=f"_{version}", pts=pts,
     )
 
 
@@ -651,10 +647,10 @@ def _truncate_cmap_no_white(cmap, minval=0.25):
 
 
 def _color_to_black_cmap(base_cmap, name):
-    """Create cmap from base color to dark tint (not pure black) so configs stay distinguishable."""
-    color = base_cmap(0.65)  # characteristic color from the cmap
-    dark = base_cmap(0.95)   # dark tint of same color (not pure black)
-    cm = mcolors.LinearSegmentedColormap.from_list(name, [color, dark])
+    """Create cmap from light color to dark tint so configs stay distinguishable."""
+    light = base_cmap(0.5)   # light end of the cmap
+    dark = base_cmap(0.95)   # dark tint of same color
+    cm = mcolors.LinearSegmentedColormap.from_list(name, [light, dark])
     cm.set_bad(color="none", alpha=0)
     return cm
 
@@ -677,30 +673,53 @@ def _enforce_axis_fontsize(ax):
 
 
 def _normalize_figure_fonts(fig):
-    """Set all text in figure to IEEE_FONTSIZE. Skip marker and sub-labels (keep MARKER_FONTSIZE, SUB_FONTSIZE)."""
-    skip_sizes = (MARKER_FONTSIZE, 5, 9)  # 9 = legend fontsize
+    """Set all text in figure to IEEE_FONTSIZE. Skip intentionally smaller text (markers, annotations)."""
     for obj in fig.findobj(Text):
-        if hasattr(obj, "get_fontsize") and obj.get_fontsize() in skip_sizes:
+        if hasattr(obj, "get_fontsize") and obj.get_fontsize() < IEEE_FONTSIZE:
             continue
         obj.set_fontsize(IEEE_FONTSIZE)
 
 
-def _add_legend_labels(ax, labels, unit=None, pad=0, unit_y=-0.15):
-    """Draw labels under each colorbar, rotated 90 deg. pad adds horizontal padding. unit_y sets unit label vertical position."""
+def _add_legend_labels(ax, labels, unit=None, pad=0, label_y=None, unit_y=None, label_va="bottom", unit_va="bottom", fontsize=None):
+    """Draw rotated labels in the strip below the colorbars."""
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
     n = len(labels)
-    if n == 0:
-        return
-    for i in range(n):
-        if pad > 0 and n > 1:
-            x = pad + (i / (n - 1)) * (1 - 2 * pad)
-        else:
-            x = (i + 0.5) / n
-        ax.text(x, 0.45, labels[i], ha="center", va="top", fontsize=IEEE_FONTSIZE, transform=ax.transAxes, rotation=90)
+    if label_y is None:
+        label_y = 0.18 if unit else 0.03
+    if unit_y is None:
+        unit_y = 0.03
+    if fontsize is None:
+        fontsize = IEEE_FONTSIZE
+    if n > 0:
+        for i in range(n):
+            if pad > 0 and n > 1:
+                x = pad + (i / (n - 1)) * (1 - 2 * pad)
+            else:
+                x = (i + 0.5) / n
+            ax.text(
+                x,
+                label_y,
+                labels[i],
+                ha="center",
+                va=label_va,
+                fontsize=fontsize,
+                transform=ax.transAxes,
+                rotation=90,
+                clip_on=False,
+            )
     if unit:
-        ax.text(0.5, unit_y, f"({unit})", ha="center", va="center", fontsize=IEEE_FONTSIZE, transform=ax.transAxes, clip_on=False)
+        ax.text(
+            0.5,
+            unit_y,
+            f"({unit})",
+            ha="center",
+            va=unit_va,
+            fontsize=fontsize,
+            transform=ax.transAxes,
+            clip_on=False,
+        )
 
 
 def _tighten_scale_label_gap(fig, n_cbars, gap_reduce=0.05, start_ax=1):
@@ -725,7 +744,7 @@ def _shift_scale_labels_down(fig, n_cbars, shift=0.06, start_ax=1):
     ax_legend.set_position([leg_pos.x0, leg_pos.y0 - shift, leg_pos.width, leg_pos.height])
 
 
-def _pull_scales_closer(fig, n_cbars, shift_left=0.12, start_ax=1):
+def _pull_scales_closer(fig, n_cbars, shift_left=0.14, start_ax=1):
     """Move colorbar axes left to reduce gap between plot and scales."""
     cbar_axes = fig.axes[start_ax:start_ax + n_cbars]
     ax_legend = fig.axes[start_ax + n_cbars]
@@ -734,6 +753,12 @@ def _pull_scales_closer(fig, n_cbars, shift_left=0.12, start_ax=1):
         cax.set_position([pos.x0 - shift_left, pos.y0, pos.width, pos.height])
     leg_pos = ax_legend.get_position()
     ax_legend.set_position([leg_pos.x0 - shift_left, leg_pos.y0, leg_pos.width, leg_pos.height])
+
+
+def _reserve_bottom_space_for_scale_labels(ax, extra=0.05):
+    """Shrink the main plot slightly to free bottom space for rotated scale labels."""
+    pos = ax.get_position()
+    ax.set_position([pos.x0, pos.y0 + extra, pos.width, pos.height - extra])
 
 
 def _add_param_colorbars(fig, gs_cbars, values, log_vmin, vmax):
@@ -746,12 +771,34 @@ def _add_param_colorbars(fig, gs_cbars, values, log_vmin, vmax):
         sm = ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
-        cbar.outline.set_linewidth(0.5)
+        cbar.outline.set_linewidth(0.2)
         if i < n - 1:
             cbar.ax.set_yticks([])
             cbar.ax.set_yticklabels([])
         else:
             cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
+
+
+def _add_labels_inside_colorbars(fig, labels, start_ax=1, y=0.01, fontsize=None, color="black", stroke_color=None):
+    """Place one rotated label inside each colorbar axis, centered vertically."""
+    if fontsize is None:
+        fontsize = IEEE_FONTSIZE
+    for i, label in enumerate(labels):
+        cax = fig.axes[start_ax + i]
+        txt = cax.text(
+            0.5,
+            y,
+            label,
+            ha="center",
+            va="bottom",
+            rotation=90,
+            fontsize=fontsize,
+            color=color,
+            transform=cax.transAxes,
+            clip_on=True,
+        )
+        if stroke_color:
+            txt.set_path_effects([patheffects.withStroke(linewidth=1.5, foreground=stroke_color)])
 
 
 def _align_colorbars_to_plot(fig, n_cbars, start_ax=1):
@@ -765,28 +812,54 @@ def _align_colorbars_to_plot(fig, n_cbars, start_ax=1):
         cax.set_position([pos.x0, y0, pos.width, height])
 
 
-def _add_per_label_above_colorbars(fig, n_cbars, start_ax=1):
-    """Add PER (%) label above the gradient scale."""
+def _position_scale_label_strip(fig, n_cbars, bottom=0.03, gap=0.01, start_ax=1):
+    """Place the label strip directly below the colorbars, fully inside the figure."""
+    ax_main = fig.axes[0]
     cbar_axes = fig.axes[start_ax:start_ax + n_cbars]
+    ax_legend = fig.axes[start_ax + n_cbars]
     if not cbar_axes:
         return
-    b0, b1 = cbar_axes[0].get_position(), cbar_axes[-1].get_position()
-    x_center = (b0.x0 + b1.x0 + b1.width) / 2
-    y_top = b0.y0 + b0.height
-    fig.text(x_center, y_top + 0.02, "PER (%)", ha="center", va="bottom", fontsize=IEEE_FONTSIZE)
+    main_pos = ax_main.get_position()
+    x0 = min(ax.get_position().x0 for ax in cbar_axes)
+    x1 = max(ax.get_position().x0 + ax.get_position().width for ax in cbar_axes)
+    y0 = bottom
+    y1 = max(bottom + 0.04, main_pos.y0 - gap)
+    ax_legend.set_position([x0, y0, x1 - x0, y1 - y0])
 
 
-def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins, energy_bins, mat, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, cmap, suffix=""):
-    """Combined PER heatmap (all configs). Same style as transition plots: 7.16x4, IEEE fonts. Log scale, cmap to black."""
+def _add_per_label_above_colorbars(fig, n_cbars, start_ax=1):
+    """Add PER (%) label inside the main plot (upper-right corner)."""
+    if not fig.axes:
+        return
+    ax_main = fig.axes[0]
+    ax_main.text(
+        0.98,
+        0.98,
+        "PER (%)",
+        ha="right",
+        va="top",
+        fontsize=IEEE_FONTSIZE,
+        color="black",
+        transform=ax_main.transAxes,
+        zorder=6,
+    )
+
+
+
+def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins, energy_bins, mat, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, cmap, suffix="", pts=None):
+    """Combined PER heatmap with annotated SF/BW config regions showing performance-energy patterns."""
+    print(f"Rendering combined heatmap{suffix}...")
     fig = plt.figure(figsize=(7.16, 4))
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.08], wspace=0.001)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.05], wspace=0.008)
     ax = fig.add_subplot(gs[0])
     ax.set_facecolor(BG_DARK)
+    for spine in ax.spines.values():
+        spine.set_color("black")
     ax.tick_params(axis="both", colors="black", labelsize=IEEE_FONTSIZE)
     ax.xaxis.label.set_color("black")
     ax.yaxis.label.set_color("black")
-    for spine in ax.spines.values():
-        spine.set_color("black")
+
+    # Draw PER heatmap
     scaled = np.where(np.isnan(mat), np.nan, np.maximum(mat * 0.2, log_vmin))
     mat_masked = np.ma.masked_where(np.isnan(mat), scaled)
     im = ax.pcolormesh(
@@ -799,20 +872,118 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
     ax.set_xlabel(r"$T_{\mathrm{init}}$ (min)", fontsize=IEEE_FONTSIZE)
     ax.set_ylabel("Energy (mJ)", fontsize=IEEE_FONTSIZE)
     _enforce_axis_fontsize(ax)
-    config_points = _get_all_config_switch_points(config_dir, data_root, filters, include_params=["sf", "bw", "tp"],
-                                                   time_min_threshold=30, energy_min_threshold=60)
-    # Combined plot: first SF onward; SF->next 3 BWs; each BW->next TPs; TP->empty; v2 uses symbols
-    _draw_config_change_markers(ax, config_points, t_min, t_max, e_min, e_max, include_params=["sf", "bw", "tp"],
-                               use_markers=True, partner_map="combined")
-    _add_config_switch_legend(ax, ["sf", "bw", "tp"], plot_param="combined", use_markers=True)
+
+    # --- Config region annotations ---
+    switches = _load_config_switches_from_csv(config_dir)
+    if switches:
+        # Group configs by SF
+        sf_configs = {}
+        for tm, sf, bw, tp in switches:
+            sf_configs.setdefault(sf, []).append((tm, bw, tp))
+        sorted_sfs = sorted(sf_configs.keys())
+
+        # Build SF regions: (sf, t_start_min, t_end_min)
+        sf_regions = []
+        for i, sf in enumerate(sorted_sfs):
+            ts = min(t for t, _, _ in sf_configs[sf])
+            if i + 1 < len(sorted_sfs):
+                te = min(t for t, _, _ in sf_configs[sorted_sfs[i + 1]])
+            else:
+                times_sf = sorted(t for t, _, _ in sf_configs[sf])
+                te = times_sf[-1] + (times_sf[-1] - times_sf[-2]) if len(times_sf) >= 2 else t_max
+            sf_regions.append((sf, ts, min(te, t_max)))
+
+        e_range = e_max - e_min
+
+        # Draw SF region bands with characteristic colors
+        for idx, (sf, ts, te) in enumerate(sf_regions):
+            ts_c = max(ts, t_min)
+            te_c = min(te, t_max)
+            if ts_c >= te_c:
+                continue
+            band_color = _BASE_CMAPS[idx % len(_BASE_CMAPS)](0.18)
+            ax.axvspan(ts_c, te_c, color=band_color, alpha=0.35, zorder=0.5)
+
+            # SF transition line (solid, between regions)
+            if idx > 0 and ts >= t_min:
+                ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
+
+            # SF label vertical inside upper-left of band (lowered)
+            x_label = ts_c + (t_max - t_min) * 0.01
+            
+            if idx < 2:
+                y_label = e_max - e_range * 0.1
+            else:
+                y_label = e_max - e_range * 0.05
+            txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
+                            fontsize=8, color="black", zorder=6,
+                            rotation=90, rotation_mode="anchor")
+            txt.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
+
+            # Per-SF statistics from raw packets
+            if pts:
+                sf_pts = [p for p in pts if ts <= p[0] < te]
+                if sf_pts:
+                    n_total = len(sf_pts)
+                    n_lost = sum(1 for p in sf_pts if p[2] == 1)
+                    per_val = 100.0 * n_lost / n_total
+                    avg_e = float(np.mean([p[1] for p in sf_pts]))
+
+                    # PER % — vertical for first two SFs, horizontal for the rest
+                    y_per = e_max - e_range*0.01
+                    if idx < 2:
+                        sub = ax.text(x_label, y_per - e_range*0.075, f"{per_val:.1f}%", ha="left", va="top",
+                                     fontsize=8, color="black", zorder=6,
+                                     rotation=90, rotation_mode="anchor")
+                    else:
+                        sub = ax.text(x_label, y_per, f"{per_val:.1f}%", ha="left", va="top",
+                                     fontsize=8, color="black", zorder=6,
+                                     rotation=0, rotation_mode="anchor")
+                    sub.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
+
+        # Configuration path: connect mean energy centroids per config period
+        if pts:
+            path_times = []
+            path_energies = []
+            for i, (tm, sf, bw, tp) in enumerate(switches):
+                # Determine config period
+                t_start = tm
+                if i + 1 < len(switches):
+                    t_end = switches[i + 1][0]
+                else:
+                    t_end = t_max
+                # Clip to visible range
+                t_start_c = max(t_start, t_min)
+                t_end_c = min(t_end, t_max)
+                if t_start_c >= t_end_c:
+                    continue
+                # Packets in this config period
+                cfg_pts = [p for p in pts if t_start <= p[0] < t_end]
+                if cfg_pts:
+                    avg_e = float(np.mean([p[1] for p in cfg_pts]))
+                    path_times.append(tm)  # Use actual config switch time
+                    path_energies.append(avg_e)
+            if len(path_times) >= 2:
+                ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
+                ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
+                ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
+                          borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
+
+    # Compact colorbar
     cax = fig.add_subplot(gs[1])
     cbar = fig.colorbar(im, cax=cax, orientation="vertical")
     cbar.outline.set_linewidth(0.5)
     cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
-    cbar.set_label("PER (%)", fontsize=IEEE_FONTSIZE)
-    pos = cax.get_position()
-    cax.set_position([pos.x0 - 0.12, pos.y0, pos.width, pos.height])
     _align_colorbars_to_plot(fig, 1)
+    # Pull colorbar closer to plot (manual shift — combined plot has no legend axis)
+    cax_pos = cax.get_position()
+    cax.set_position([cax_pos.x0 - 0.15, cax_pos.y0, cax_pos.width, cax_pos.height])
+
+    # PER label below the colorbar, aligned with x-axis tick labels
+    cax_pos2 = cax.get_position()
+    fig.text(cax_pos2.x0 + cax_pos2.width / 2, cax_pos2.y0 - 0.03, "PER (%)",
+             ha="center", va="top", fontsize=IEEE_FONTSIZE, color="black")
+
     _normalize_figure_fonts(fig)
     fname = f"raw_per_gradient_energy_vs_time{suffix}.png" if suffix else "raw_per_gradient_energy_vs_time.png"
     fig.savefig(os.path.join(output_dir, fname), dpi=220, bbox_inches="tight")
@@ -820,11 +991,13 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
     print(f"Saved: {fname}")
 
 
-def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix=""):
-    """Overlay all BW heatmaps, one color-to-black cmap per BW value. IEEE double-column width."""
+def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
+    """BW transitions: one color-to-black cmap per BW, annotated BW region bands with SF separators."""
+    print(f"Rendering BW transition heatmap{output_suffix}...")
     fig = plt.figure(figsize=(7.16, 4))
     gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.001)
     ax = fig.add_subplot(gs[0])
+    _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
     ax.tick_params(axis="both", colors="black", labelsize=IEEE_FONTSIZE)
     ax.xaxis.label.set_color("black")
@@ -847,32 +1020,98 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
     ax.set_xlabel(r"$T_{\mathrm{init}}$ (min)", fontsize=IEEE_FONTSIZE)
     ax.set_ylabel("Energy (mJ)", fontsize=IEEE_FONTSIZE)
     _enforce_axis_fontsize(ax)
-    config_points = _get_all_config_switch_points(config_dir, data_root, filters, include_params=["sf", "tp"],
-                                                   time_min_threshold=30, energy_min_threshold=60)
-    _draw_config_change_markers(ax, config_points, t_min, t_max, e_min, e_max, plot_param="bw", include_params=["sf", "tp"], use_markers=True)
-    _add_config_switch_legend(ax, ["sf", "tp"], plot_param="bw", use_markers=True)
+
+    # Annotated BW region bands
+    switches = _load_config_switches_from_csv(config_dir)
+    if switches:
+        bw_configs = {}
+        for tm, sf, bw, tp in switches:
+            bw_configs.setdefault(bw, []).append((tm, sf, tp))
+        sorted_bws = sorted(bw_configs.keys())
+        e_range = e_max - e_min
+
+        # BW regions: within each SF, BW configs appear in order; group by BW across all SFs
+        # Show per-BW statistics
+        for idx, bw in enumerate(sorted_bws):
+            bw_label = f"BW{bw/1000:.1f}".replace(".0", "")
+            band_color = _BASE_CMAPS[idx % len(_BASE_CMAPS)](0.25)
+            if pts:
+                bw_pts = [p for p in collect_all_packets_time_energy_lost(data_root, filters, include_bw=bw)]
+                if bw_pts:
+                    n_total = len(bw_pts)
+                    n_lost = sum(1 for p in bw_pts if p[2] == 1)
+                    per_val = 100.0 * n_lost / n_total
+                    avg_e = float(np.mean([p[1] for p in bw_pts]))
+
+        # SF separation lines
+        sf_configs = {}
+        for tm, sf, bw, tp in switches:
+            sf_configs.setdefault(sf, []).append((tm, bw, tp))
+        sorted_sfs = sorted(sf_configs.keys())
+        for i, sf in enumerate(sorted_sfs):
+            ts = min(t for t, _, _ in sf_configs[sf])
+            if i + 1 < len(sorted_sfs):
+                te = min(t for t, _, _ in sf_configs[sorted_sfs[i + 1]])
+            else:
+                times_sf = sorted(t for t, _, _ in sf_configs[sf])
+                te = times_sf[-1] + (times_sf[-1] - times_sf[-2]) if len(times_sf) >= 2 else t_max
+            ts_c, te_c = max(ts, t_min), min(te, t_max)
+            if ts_c >= te_c:
+                continue
+            # SF separator line
+            if i > 0 and ts >= t_min:
+                ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
+            # SF label vertical inside upper-left of band (lowered)
+            x_label = ts_c + (t_max - t_min) * 0.01
+            y_label = e_max - e_range * 0.01
+            txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
+                         fontsize=8, color="black", zorder=6,
+                         rotation=90, rotation_mode="anchor")
+            txt.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
+
+        # Configuration path: show full path through all configs
+        if pts:
+            path_times = []
+            path_energies = []
+            for i, (tm, sf, bw, tp) in enumerate(switches):
+                t_start = tm
+                t_end = switches[i + 1][0] if i + 1 < len(switches) else t_max
+                if max(t_start, t_min) >= min(t_end, t_max):
+                    continue
+                cfg_pts = [p for p in pts if t_start <= p[0] < t_end]
+                if cfg_pts:
+                    avg_e = float(np.mean([p[1] for p in cfg_pts]))
+                    path_times.append(tm)  # Use actual config switch time
+                    path_energies.append(avg_e)
+            if len(path_times) >= 2:
+                ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
+                ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
+                ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
+                          borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
+
     labels_bw = [f"BW{bw/1000:.1f}".replace(".0", "") for bw in BW_VALUES]
-    gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.72, 0.28], hspace=0)
+    gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.64, 0.36], hspace=0)
     gs_cbars = gs_right[0].subgridspec(1, len(BW_VALUES), wspace=0.02)
     _add_param_colorbars(fig, gs_cbars, BW_VALUES, log_vmin, vmax)
     ax_leg = fig.add_subplot(gs_right[1])
-    _add_legend_labels(ax_leg, labels_bw, unit="kHz", unit_y=-0.25)
-    _tighten_scale_label_gap(fig, len(BW_VALUES))
-    _shift_scale_labels_down(fig, len(BW_VALUES))
+    _add_labels_inside_colorbars(fig, labels_bw, color="white", stroke_color="black")
+    _add_legend_labels(ax_leg, [], unit="kHz", unit_y=0.88, unit_va="top")
     _pull_scales_closer(fig, len(BW_VALUES))
     _align_colorbars_to_plot(fig, len(BW_VALUES))
-    _add_per_label_above_colorbars(fig, len(BW_VALUES))
+    _position_scale_label_strip(fig, len(BW_VALUES), bottom=0.02, gap=0.008)
     _normalize_figure_fonts(fig)
     fig.savefig(os.path.join(output_dir, f"raw_per_gradient_energy_vs_time_bw_transitions{output_suffix}.png"), dpi=220, bbox_inches="tight")
     plt.close()
     print(f"Saved: raw_per_gradient_energy_vs_time_bw_transitions{output_suffix}.png")
 
 
-def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix=""):
-    """Overlay all SF heatmaps, one color-to-black cmap per SF value. IEEE double-column width."""
+def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
+    """SF transitions: one color-to-black cmap per SF, annotated SF region bands with BW separators and PER stats."""
+    print(f"Rendering SF transition heatmap{output_suffix}...")
     fig = plt.figure(figsize=(7.16, 4))
     gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.001)
     ax = fig.add_subplot(gs[0])
+    _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
     ax.tick_params(axis="both", colors="black", labelsize=IEEE_FONTSIZE)
     ax.xaxis.label.set_color("black")
@@ -885,7 +1124,7 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
         mat = build_matrix_fn(pts_s, time_bins, energy_bins)
         scaled = np.where(np.isnan(mat), np.nan, np.maximum(mat * 0.2, log_vmin))
         mat_masked = np.ma.masked_where(np.isnan(mat), scaled)
-        im = ax.pcolormesh(
+        ax.pcolormesh(
             time_bins, energy_bins, mat_masked,
             cmap=cmap, norm=LogNorm(vmin=log_vmin, vmax=vmax), shading="flat",
         )
@@ -895,32 +1134,85 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
     ax.set_xlabel(r"$T_{\mathrm{init}}$ (min)", fontsize=IEEE_FONTSIZE)
     ax.set_ylabel("Energy (mJ)", fontsize=IEEE_FONTSIZE)
     _enforce_axis_fontsize(ax)
-    config_points = _get_all_config_switch_points(config_dir, data_root, filters, include_params=["bw", "tp"],
-                                                   time_min_threshold=30, energy_min_threshold=60)
-    _draw_config_change_markers(ax, config_points, t_min, t_max, e_min, e_max, plot_param="sf", include_params=["bw", "tp"], use_markers=True)
-    _add_config_switch_legend(ax, ["bw", "tp"], plot_param="sf", use_markers=True)
+
+    # Annotated SF region bands with BW separators
+    switches = _load_config_switches_from_csv(config_dir)
+    if switches:
+        sf_configs = {}
+        for tm, sf, bw, tp in switches:
+            sf_configs.setdefault(sf, []).append((tm, bw, tp))
+        sorted_sfs = sorted(sf_configs.keys())
+        e_range = e_max - e_min
+
+        for i, sf in enumerate(sorted_sfs):
+            ts = min(t for t, _, _ in sf_configs[sf])
+            if i + 1 < len(sorted_sfs):
+                te = min(t for t, _, _ in sf_configs[sorted_sfs[i + 1]])
+            else:
+                times_sf = sorted(t for t, _, _ in sf_configs[sf])
+                te = times_sf[-1] + (times_sf[-1] - times_sf[-2]) if len(times_sf) >= 2 else t_max
+            ts_c, te_c = max(ts, t_min), min(te, t_max)
+            if ts_c >= te_c:
+                continue
+            band_color = _BASE_CMAPS[i % len(_BASE_CMAPS)](0.18)
+            ax.axvspan(ts_c, te_c, color=band_color, alpha=0.25, zorder=0.5)
+
+            if i > 0 and ts >= t_min:
+                ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
+
+            # SF label vertical inside upper-left of band (lowered)
+            x_label = ts_c + (t_max - t_min) * 0.01
+            y_label = e_max - e_range * 0.01
+            txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
+                         fontsize=8, color="black", zorder=6,
+                         rotation=90, rotation_mode="anchor")
+            txt.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
+
+            if pts:
+                sf_pts = [p for p in pts if ts <= p[0] < te]
+
+        # Configuration path: show full path through all configs
+        if pts:
+            path_times = []
+            path_energies = []
+            for i, (tm, sf, bw, tp) in enumerate(switches):
+                t_start = tm
+                t_end = switches[i + 1][0] if i + 1 < len(switches) else t_max
+                if max(t_start, t_min) >= min(t_end, t_max):
+                    continue
+                cfg_pts = [p for p in pts if t_start <= p[0] < t_end]
+                if cfg_pts:
+                    avg_e = float(np.mean([p[1] for p in cfg_pts]))
+                    path_times.append(tm)  # Use actual config switch time
+                    path_energies.append(avg_e)
+            if len(path_times) >= 2:
+                ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
+                ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
+                ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
+                          borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
+
     labels_sf = [f"SF{sf}" for sf in SF_VALUES]
-    gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.72, 0.28], hspace=0)
+    gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.64, 0.36], hspace=0)
     gs_cbars = gs_right[0].subgridspec(1, len(SF_VALUES), wspace=0.03)
     _add_param_colorbars(fig, gs_cbars, SF_VALUES, log_vmin, vmax)
     ax_leg = fig.add_subplot(gs_right[1])
-    _add_legend_labels(ax_leg, labels_sf, pad=0.03)
-    _tighten_scale_label_gap(fig, len(SF_VALUES))
-    _shift_scale_labels_down(fig, len(SF_VALUES))
+    _add_legend_labels(ax_leg, labels_sf, pad=0.02, label_y=0.98, label_va="top")
     _pull_scales_closer(fig, len(SF_VALUES))
     _align_colorbars_to_plot(fig, len(SF_VALUES))
-    _add_per_label_above_colorbars(fig, len(SF_VALUES))
+    _position_scale_label_strip(fig, len(SF_VALUES), bottom=0.02, gap=0.008)
     _normalize_figure_fonts(fig)
     fig.savefig(os.path.join(output_dir, f"raw_per_gradient_energy_vs_time_sf_transitions{output_suffix}.png"), dpi=220, bbox_inches="tight")
     plt.close()
     print(f"Saved: raw_per_gradient_energy_vs_time_sf_transitions{output_suffix}.png")
 
 
-def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix=""):
-    """Overlay all TP heatmaps, one color-to-black cmap per TP value. IEEE double-column width."""
+def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
+    """TP transitions: one color-to-black cmap per TP, annotated SF region bands with BW separators."""
+    print(f"Rendering TP transition heatmap{output_suffix}...")
     fig = plt.figure(figsize=(7.16, 4))
     gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.001)
     ax = fig.add_subplot(gs[0])
+    _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
     ax.tick_params(axis="both", colors="black", labelsize=IEEE_FONTSIZE)
     ax.xaxis.label.set_color("black")
@@ -943,21 +1235,80 @@ def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_b
     ax.set_xlabel(r"$T_{\mathrm{init}}$ (min)", fontsize=IEEE_FONTSIZE)
     ax.set_ylabel("Energy (mJ)", fontsize=IEEE_FONTSIZE)
     _enforce_axis_fontsize(ax)
-    config_points = _get_all_config_switch_points(config_dir, data_root, filters, include_params=["sf", "bw"],
-                                                   time_min_threshold=30, energy_min_threshold=60)
-    _draw_config_change_markers(ax, config_points, t_min, t_max, e_min, e_max, plot_param="tp", include_params=["sf", "bw"], use_markers=True)
-    _add_config_switch_legend(ax, ["sf", "bw"], plot_param="tp", use_markers=True)
+
+    # Annotated SF region bands with BW separators
+    switches = _load_config_switches_from_csv(config_dir)
+    if switches:
+        sf_configs = {}
+        for tm, sf, bw, tp in switches:
+            sf_configs.setdefault(sf, []).append((tm, bw, tp))
+        sorted_sfs = sorted(sf_configs.keys())
+        e_range = e_max - e_min
+
+        for i, sf in enumerate(sorted_sfs):
+            ts = min(t for t, _, _ in sf_configs[sf])
+            if i + 1 < len(sorted_sfs):
+                te = min(t for t, _, _ in sf_configs[sorted_sfs[i + 1]])
+            else:
+                times_sf = sorted(t for t, _, _ in sf_configs[sf])
+                te = times_sf[-1] + (times_sf[-1] - times_sf[-2]) if len(times_sf) >= 2 else t_max
+            ts_c, te_c = max(ts, t_min), min(te, t_max)
+            if ts_c >= te_c:
+                continue
+
+            if i > 0 and ts >= t_min:
+                ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
+
+            # SF label vertical inside upper-left of band (lowered)
+            x_label = ts_c + (t_max - t_min) * 0.01
+            y_label = e_max - e_range * 0.01
+            txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
+                         fontsize=8, color="black", zorder=6,
+                         rotation=90, rotation_mode="anchor")
+            txt.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
+
+        # Configuration path: simplified (one point per SF,BW pair)
+        if pts:
+            # Group configs by (sf, bw) - collect first time and all energies
+            sf_bw_data = {}
+            for i, (tm, sf, bw, tp) in enumerate(switches):
+                key = (sf, bw)
+                t_start = tm
+                t_end = switches[i + 1][0] if i + 1 < len(switches) else t_max
+                if max(t_start, t_min) >= min(t_end, t_max):
+                    continue
+                cfg_pts = [p for p in pts if t_start <= p[0] < t_end]
+                if cfg_pts:
+                    avg_e = float(np.mean([p[1] for p in cfg_pts]))
+                    if key not in sf_bw_data:
+                        sf_bw_data[key] = (tm, [])  # Use first config's time
+                    sf_bw_data[key][1].append(avg_e)
+            # Build path in order: SF7->all BWs, SF8->all BWs, etc.
+            path_times = []
+            path_energies = []
+            for sf in SF_VALUES:
+                for bw in BW_VALUES:
+                    key = (sf, bw)
+                    if key in sf_bw_data:
+                        tm, energies = sf_bw_data[key]
+                        path_times.append(tm)
+                        path_energies.append(float(np.mean(energies)))
+            if len(path_times) >= 2:
+                ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
+                ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
+                ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
+                          borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
+
     labels_tp = [f"TP{tp}" for tp in TP_VALUES]
-    gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.72, 0.28], hspace=0)
+    gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.64, 0.36], hspace=0)
     gs_cbars = gs_right[0].subgridspec(1, len(TP_VALUES), wspace=0.02)
     _add_param_colorbars(fig, gs_cbars, TP_VALUES, log_vmin, vmax)
     ax_leg = fig.add_subplot(gs_right[1])
-    _add_legend_labels(ax_leg, labels_tp, unit="dBm")
-    _tighten_scale_label_gap(fig, len(TP_VALUES))
-    _shift_scale_labels_down(fig, len(TP_VALUES))
+    _add_labels_inside_colorbars(fig, labels_tp, color="white", stroke_color="black")
+    _add_legend_labels(ax_leg, [], unit="dBm", unit_y=0.88, unit_va="top")
     _pull_scales_closer(fig, len(TP_VALUES))
     _align_colorbars_to_plot(fig, len(TP_VALUES))
-    _add_per_label_above_colorbars(fig, len(TP_VALUES))
+    _position_scale_label_strip(fig, len(TP_VALUES), bottom=0.02, gap=0.008)
     _normalize_figure_fonts(fig)
     fig.savefig(os.path.join(output_dir, f"raw_per_gradient_energy_vs_time_tp_transitions{output_suffix}.png"), dpi=220, bbox_inches="tight")
     plt.close()
