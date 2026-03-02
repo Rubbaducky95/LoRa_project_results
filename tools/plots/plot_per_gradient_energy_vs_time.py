@@ -771,7 +771,7 @@ def _add_param_colorbars(fig, gs_cbars, values, log_vmin, vmax):
         sm = ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
-        cbar.outline.set_linewidth(0.2)
+        cbar.outline.set_linewidth(0.9)
         if i < n - 1:
             cbar.ax.set_yticks([])
             cbar.ax.set_yticklabels([])
@@ -909,11 +909,16 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                 ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
 
             # SF label vertical inside upper-left of band (lowered)
-            x_label = ts_c + (t_max - t_min) * 0.01
+
+            
             
             if idx < 2:
-                y_label = e_max - e_range * 0.1
+                x_label = ts_c + (t_max - t_min) * 0.015
+                if idx < 1:
+                    x_label = ts_c + (t_max - t_min) * 0.005
+                y_label = e_max - e_range * 0.12
             else:
+                x_label = ts_c + (t_max - t_min) * 0.009
                 y_label = e_max - e_range * 0.05
             txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
                             fontsize=IEEE_FONTSIZE, color="black", zorder=6,
@@ -932,7 +937,7 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                     # PER % — vertical for first two SFs, horizontal for the rest
                     y_per = e_max - e_range*0.01
                     if idx < 2:
-                        sub = ax.text(x_label, y_per - e_range*0.075, f"{per_val:.1f}%", ha="left", va="top",
+                        sub = ax.text(x_label, y_per - e_range*0.09, f"{per_val:.1f}%", ha="left", va="top",
                                      fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                                      rotation=90, rotation_mode="anchor")
                     else:
@@ -957,8 +962,8 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                 for i, (t, e, cfg) in enumerate(zip(path_times, path_energies, path_configs)):
                     cfg_str = f"SF{cfg[0]}_BW{cfg[1]}_TP{cfg[2]}"
                     print(f"    [{i}] t={t:.2f} min, e={e:.2f} mJ ({cfg_str})")
-                ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
-                ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
+                ax.plot(path_times, path_energies, color="white", linewidth=2.0, zorder=3, alpha=0.9)
+                ax.plot(path_times, path_energies, color="black", linewidth=1.0, zorder=3.5, alpha=0.9, label="cfg path")
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
                           borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
 
