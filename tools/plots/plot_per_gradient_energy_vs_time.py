@@ -933,11 +933,11 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                     y_per = e_max - e_range*0.01
                     if idx < 2:
                         sub = ax.text(x_label, y_per - e_range*0.075, f"{per_val:.1f}%", ha="left", va="top",
-                                     fontsize=8, color="black", zorder=6,
+                                     fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                                      rotation=90, rotation_mode="anchor")
                     else:
                         sub = ax.text(x_label, y_per, f"{per_val:.1f}%", ha="left", va="top",
-                                     fontsize=8, color="black", zorder=6,
+                                     fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                                      rotation=0, rotation_mode="anchor")
                     sub.set_path_effects([patheffects.withStroke(linewidth=2, foreground="white")])
 
@@ -972,11 +972,11 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
     cax_pos = cax.get_position()
     cax.set_position([cax_pos.x0 - 0.15, cax_pos.y0, cax_pos.width, cax_pos.height])
 
-    # PER label below the colorbar, aligned with x-axis label
+    # PER label below the colorbar, aligned with x-axis tick values
     ax_pos = ax.get_position()
     cax_pos2 = cax.get_position()
-    # Use same y as x-axis label would be (slightly below plot bottom)
-    y_xlabel = ax_pos.y0 - 0.06
+    # Align with x-axis tick labels (at plot bottom)
+    y_xlabel = ax_pos.y0 - 0.02
     fig.text(cax_pos2.x0 + cax_pos2.width / 2, y_xlabel, "PER (%)",
              ha="center", va="top", fontsize=IEEE_FONTSIZE, color="black")
 
