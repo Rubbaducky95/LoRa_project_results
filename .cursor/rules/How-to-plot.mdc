@@ -11,3 +11,6 @@ alwaysApply: true
 - Always use kHz when plotting with bandwidth
 - Always specify the unit for the axis
 - Figure size – Set to 7.16" × 4" (IEEE double-column width).
+- Use 10pt for font size
+- Use this document as reference:
+https://ftpmirror1.infania.net/mirror/CTAN/macros/latex/contrib/IEEEtran/IEEEtran_HOWTO.pdf
