@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
 
+from plot_config import IEEE_FONTSIZE, FIGSIZE_TWO_COL, SAVE_DPI
+
 
 def setup_plot_style():
     latex_ok = shutil.which("latex") is not None
@@ -43,7 +45,7 @@ def gaussian_smooth(y, sigma=5):
     padded = np.pad(y.astype(float), k, mode="edge")
     return np.convolve(padded, kernel, mode="valid")
 
-WORKSPACE = r"C:\Users\ruben\Documents\LoRa Project"
+WORKSPACE = r"C:\Users\ruben\Documents\LoRa_project_results"
 DATA_ROOT = os.path.join(WORKSPACE, "raw_test_data")
 RESET_CSV = os.path.join(WORKSPACE, "results", "time_reset_locations.csv")
 
@@ -222,76 +224,70 @@ def main():
     n = len(dist_folders)
     ncols = 4
     nrows = (n + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), sharex=False, sharey=False, squeeze=False)
-    for ax in axes.flat:
-        ax.set_visible(False)
-
-    for i, dn in enumerate(dist_folders):
-        dpath = os.path.join(DATA_ROOT, dn)
-        distance = parse_distance(dn)
-        if distance is None:
-            continue
-        row, col = i // ncols, i % ncols
-        ax = axes[row, col]
-        ax.set_visible(True)
-        indices, times, config_ids = collect_times_for_distance(dpath)
-        if len(indices) == 0:
-            continue
-
-        # Smooth curve for time_since_transmission_init_ms (no inconsistency markers)
-        sigma = min(5, max(1, len(times) // 100))
-        times_smooth = gaussian_smooth(times, sigma=sigma)
-        ax.plot(indices, times_smooth / 1000, "b-", linewidth=1.2, alpha=0.9)
-
-        ax.set_title(dn, fontsize=9)
-        ax.set_xlabel("Packet index")
-        ax.set_ylabel("time_since_transmission_init (s)")
-        ax.grid(True, alpha=0.3)
-
-    fig.suptitle("time_since_transmission_init_ms", fontsize=11)
-    fig.tight_layout()
-    out_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots")
+    out_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots", "cfg_vs_time")
     os.makedirs(out_dir, exist_ok=True)
-    fig.savefig(os.path.join(out_dir, "raw_time_since_transmission_init.png"), dpi=220, bbox_inches="tight")
-    plt.close()
-    print("Saved: raw_time_since_transmission_init.png")
 
-    # raw_time_since_boot: same layout, no dotted lines
-    fig2, axes2 = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), sharex=False, sharey=False, squeeze=False)
-    for ax in axes2.flat:
-        ax.set_visible(False)
-    for i, dn in enumerate(dist_folders):
-        dpath = os.path.join(DATA_ROOT, dn)
-        if parse_distance(dn) is None:
-            continue
-        row, col = i // ncols, i % ncols
-        ax = axes2[row, col]
-        ax.set_visible(True)
-        indices, times, _ = collect_times_for_distance(dpath, time_col="time_since_boot_ms")
-        if len(indices) == 0:
-            continue
-        sigma = min(5, max(1, len(times) // 100))
-        times_smooth = gaussian_smooth(times, sigma=sigma)
-        ax.plot(indices, times_smooth / 1000, "b-", linewidth=1.2, alpha=0.9)
+    # # raw_time_since_transmission_init.png (commented out)
+    # fig, axes = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), sharex=False, sharey=False, squeeze=False)
+    # for ax in axes.flat:
+    #     ax.set_visible(False)
+    # for i, dn in enumerate(dist_folders):
+    #     dpath = os.path.join(DATA_ROOT, dn)
+    #     distance = parse_distance(dn)
+    #     if distance is None:
+    #         continue
+    #     row, col = i // ncols, i % ncols
+    #     ax = axes[row, col]
+    #     ax.set_visible(True)
+    #     indices, times, config_ids = collect_times_for_distance(dpath)
+    #     if len(indices) == 0:
+    #         continue
+    #     sigma = min(5, max(1, len(times) // 100))
+    #     times_smooth = gaussian_smooth(times, sigma=sigma)
+    #     ax.plot(indices, times_smooth / 1000, "b-", linewidth=1.2, alpha=0.9)
+    #     ax.set_title(dn, fontsize=9)
+    #     ax.set_xlabel("Packet index")
+    #     ax.set_ylabel("time_since_transmission_init (s)")
+    #     ax.grid(True, alpha=0.3)
+    # fig.suptitle("time_since_transmission_init_ms", fontsize=11)
+    # fig.tight_layout()
+    # fig.savefig(os.path.join(out_dir, "raw_time_since_transmission_init.png"), dpi=220, bbox_inches="tight")
+    # plt.close()
+    # print("Saved: raw_time_since_transmission_init.png")
 
-        # Dotted vertical lines and yellow legend at inconsistency locations
-        resets = reset_by_dist.get(dn, [])
-        for pkt_idx, prev_ms, curr_ms in resets:
-            if 0 <= pkt_idx < len(indices):
-                ax.axvline(x=pkt_idx, color="r", linestyle="--", linewidth=0.8, alpha=0.6)
-        if resets:
-            ax.text(0.02, 0.98, f"{len(resets)} fixes", transform=ax.transAxes, fontsize=8, va="top",
-                    bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8))
-
-        ax.set_title(dn, fontsize=9)
-        ax.set_xlabel("Packet index")
-        ax.set_ylabel("time_since_boot (s)")
-        ax.grid(True, alpha=0.3)
-    fig2.suptitle("time_since_boot_ms: dotted lines = inconsistency locations", fontsize=11)
-    fig2.tight_layout()
-    fig2.savefig(os.path.join(out_dir, "raw_time_since_boot.png"), dpi=220, bbox_inches="tight")
-    plt.close()
-    print("Saved: raw_time_since_boot.png")
+    # # raw_time_since_boot.png (commented out)
+    # fig2, axes2 = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), sharex=False, sharey=False, squeeze=False)
+    # for ax in axes2.flat:
+    #     ax.set_visible(False)
+    # for i, dn in enumerate(dist_folders):
+    #     dpath = os.path.join(DATA_ROOT, dn)
+    #     if parse_distance(dn) is None:
+    #         continue
+    #     row, col = i // ncols, i % ncols
+    #     ax = axes2[row, col]
+    #     ax.set_visible(True)
+    #     indices, times, _ = collect_times_for_distance(dpath, time_col="time_since_boot_ms")
+    #     if len(indices) == 0:
+    #         continue
+    #     sigma = min(5, max(1, len(times) // 100))
+    #     times_smooth = gaussian_smooth(times, sigma=sigma)
+    #     ax.plot(indices, times_smooth / 1000, "b-", linewidth=1.2, alpha=0.9)
+    #     resets = reset_by_dist.get(dn, [])
+    #     for pkt_idx, prev_ms, curr_ms in resets:
+    #         if 0 <= pkt_idx < len(indices):
+    #             ax.axvline(x=pkt_idx, color="r", linestyle="--", linewidth=0.8, alpha=0.6)
+    #     if resets:
+    #         ax.text(0.02, 0.98, f"{len(resets)} fixes", transform=ax.transAxes, fontsize=8, va="top",
+    #                 bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8))
+    #     ax.set_title(dn, fontsize=9)
+    #     ax.set_xlabel("Packet index")
+    #     ax.set_ylabel("time_since_boot (s)")
+    #     ax.grid(True, alpha=0.3)
+    # fig2.suptitle("time_since_boot_ms: dotted lines = inconsistency locations", fontsize=11)
+    # fig2.tight_layout()
+    # fig2.savefig(os.path.join(out_dir, "raw_time_since_boot.png"), dpi=220, bbox_inches="tight")
+    # plt.close()
+    # print("Saved: raw_time_since_boot.png")
 
     # Combined plot v1: averaged across distances, config labels on X-axis, dotted lines cut at curve
     dist_data, sf_bw_changes, all_config_entries = collect_times_all_distances_overlaid()
@@ -310,31 +306,33 @@ def main():
         xtick_positions = [0] + [p for p, _, _ in sf_bw_changes]
         xtick_labels = [l.replace("_", " ") for l in ["SF7_BW62.5"] + [lbl for _, lbl, _ in sf_bw_changes]]
 
-        TEXTWIDTH_IN = 3.5
-        fig3, ax3 = plt.subplots(figsize=(2 * TEXTWIDTH_IN, 4))
-        ax3.plot(indices_avg, times_smooth / 1000, "b-", linewidth=1.5, alpha=0.9)
-        ax3.set_xticks(xtick_positions)
-        ax3.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=9)
-        ymin = ax3.get_ylim()[0]
-        dotted_positions = [0] + [p for p, _, _ in sf_bw_changes]
-        for pkt_idx in dotted_positions:
-            y_at_curve = np.interp(pkt_idx, indices_avg, times_smooth / 1000)
-            ax3.plot([pkt_idx, pkt_idx], [ymin, y_at_curve], color="gray", linestyle="--", linewidth=0.8, alpha=0.7)
-        ax3.set_xlabel("Config (300 packets between changes)", fontsize=10)
-        ax3.set_ylabel("Time since first packet sent (s)", fontsize=10)
-        ax3.tick_params(axis="y", labelsize=9)
-        xmax = ax3.get_xlim()[1]
-        ax3.set_xlim(xmax=xmax - 300)
-        ax3.yaxis.set_major_formatter(plt.FuncFormatter(e3_format))
-        ax3.grid(True, alpha=0.3)
-        fig3.tight_layout()
-        fig3.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v1.png"), dpi=220, bbox_inches="tight")
-        plt.close()
-        print("Saved: raw_time_since_transmission_init_combined_v1.png")
+        # # Combined plot v1 (commented out)
+        # TEXTWIDTH_IN = 3.5
+        # fig3, ax3 = plt.subplots(figsize=(2 * TEXTWIDTH_IN, 4))
+        # ax3.plot(indices_avg, times_smooth / 1000, "b-", linewidth=1.5, alpha=0.9)
+        # ax3.set_xticks(xtick_positions)
+        # ax3.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=9)
+        # ymin = ax3.get_ylim()[0]
+        # dotted_positions = [0] + [p for p, _, _ in sf_bw_changes]
+        # for pkt_idx in dotted_positions:
+        #     y_at_curve = np.interp(pkt_idx, indices_avg, times_smooth / 1000)
+        #     ax3.plot([pkt_idx, pkt_idx], [ymin, y_at_curve], color="gray", linestyle="--", linewidth=0.8, alpha=0.7)
+        # ax3.set_xlabel("Config (300 packets between changes)", fontsize=10)
+        # ax3.set_ylabel("Time since first packet sent (s)", fontsize=10)
+        # ax3.tick_params(axis="y", labelsize=9)
+        # xmax = ax3.get_xlim()[1]
+        # ax3.set_xlim(xmax=xmax - 300)
+        # ax3.yaxis.set_major_formatter(plt.FuncFormatter(e3_format))
+        # ax3.grid(True, alpha=0.3)
+        # fig3.tight_layout()
+        # fig3.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v1.png"), dpi=220, bbox_inches="tight")
+        # plt.close()
+        # print("Saved: raw_time_since_transmission_init_combined_v1.png")
 
-        # Combined plot v2: packet index on X-axis, dotted lines from curve up, labels black and rotated
-        FONTSIZE = 12
-        fig4, ax4 = plt.subplots(figsize=(2 * TEXTWIDTH_IN, 4))
+        # Combined plot v3: packet index on X-axis, dotted lines from curve up, labels black and rotated
+        FONTSIZE = IEEE_FONTSIZE
+        dotted_positions = [0] + [p for p, _, _ in sf_bw_changes]
+        fig4, ax4 = plt.subplots(figsize=FIGSIZE_TWO_COL)
         ax4.plot(indices_avg, times_smooth / 1000, "b-", linewidth=2.2, alpha=0.9)
         ax4.set_xlabel("Packet index", fontsize=FONTSIZE)
         ax4.set_ylabel(r"$T_{\mathrm{init}}$ = Time since first packet sent (s)", fontsize=FONTSIZE)
@@ -423,10 +421,12 @@ def main():
         ]
         ax4.legend(handles=legend_elements, loc="upper right", fontsize=FONTSIZE)
         fig4.tight_layout()
-        fig4.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v2.png"), dpi=220, bbox_inches="tight")
+        fig4.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v3.png"), dpi=220, bbox_inches="tight")
         plt.close()
-        print("Saved: raw_time_since_transmission_init_combined_v2.png")
-        csv_path = os.path.join(out_dir, "config_change_T_init.csv")
+        print("Saved: raw_time_since_transmission_init_combined_v3.png")
+        # Save CSV to parent folder (raw_test_data_plots) to avoid breaking other scripts
+        csv_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots")
+        csv_path = os.path.join(csv_dir, "config_change_T_init.csv")
         config_rows = []
         for pkt_idx, sf, bw, tp, t_ms in all_config_entries:
             cfg = f"{sf}, {bw/1000}" if bw % 1000 else f"{sf}, {bw//1000}"

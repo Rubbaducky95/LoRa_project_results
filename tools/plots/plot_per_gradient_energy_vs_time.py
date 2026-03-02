@@ -23,8 +23,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 BG_DARK = "#e8e8e8"  # light grey axes background
 
-# IEEEtran conference: 10pt for all figure text (matches body text; 10pt is most common per IEEEtran HOWTO)
-IEEE_FONTSIZE = 10
+from plot_config import IEEE_FONTSIZE, FIGSIZE_TWO_COL, FIGSIZE_ONE_COL, SAVE_DPI
 # Smaller font for config switch markers (S0, B0, etc.) inside the plot
 MARKER_FONTSIZE = 7
 from plot_per_vs_multiple_configs import (
@@ -849,8 +848,8 @@ def _add_per_label_above_colorbars(fig, n_cbars, start_ax=1):
 def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins, energy_bins, mat, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, cmap, suffix="", pts=None):
     """Combined PER heatmap with annotated SF/BW config regions showing performance-energy patterns."""
     print(f"Rendering combined heatmap{suffix}...")
-    fig = plt.figure(figsize=(7.16, 4))
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.05], wspace=0.008)
+    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0)
     ax = fig.add_subplot(gs[0])
     ax.set_facecolor(BG_DARK)
     for spine in ax.spines.values():
@@ -912,14 +911,14 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
 
             
             
-            if idx < 2:
-                x_label = ts_c + (t_max - t_min) * 0.015
+            if idx < 3:
+                x_label = ts_c + (t_max - t_min) * 0.012
                 if idx < 1:
-                    x_label = ts_c + (t_max - t_min) * 0.005
-                y_label = e_max - e_range * 0.12
+                    x_label = ts_c + (t_max - t_min) * 0.012
+                y_label = e_max - e_range * 0.2
             else:
-                x_label = ts_c + (t_max - t_min) * 0.009
-                y_label = e_max - e_range * 0.05
+                x_label = ts_c + (t_max - t_min) * 0.012
+                y_label = e_max - e_range * 0.09
             txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
                             fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                             rotation=90, rotation_mode="anchor")
@@ -935,9 +934,9 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                     avg_e = float(np.mean([p[1] for p in sf_pts]))
 
                     # PER % — vertical for first two SFs, horizontal for the rest
-                    y_per = e_max - e_range*0.01
-                    if idx < 2:
-                        sub = ax.text(x_label, y_per - e_range*0.09, f"{per_val:.1f}%", ha="left", va="top",
+                    y_per = e_max - e_range*0.015
+                    if idx < 3:
+                        sub = ax.text(x_label, y_per - e_range*0.15, f"{per_val:.1f}%", ha="left", va="top",
                                      fontsize=IEEE_FONTSIZE, color="black", zorder=6,
                                      rotation=90, rotation_mode="anchor")
                     else:
@@ -958,10 +957,6 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                     path_energies.append(avg_e)
                     path_configs.append((sf, bw, tp))
             if len(path_times) >= 2:
-                print(f"  Combined path: {len(path_times)} points")
-                for i, (t, e, cfg) in enumerate(zip(path_times, path_energies, path_configs)):
-                    cfg_str = f"SF{cfg[0]}_BW{cfg[1]}_TP{cfg[2]}"
-                    print(f"    [{i}] t={t:.2f} min, e={e:.2f} mJ ({cfg_str})")
                 ax.plot(path_times, path_energies, color="white", linewidth=2.0, zorder=3, alpha=0.9)
                 ax.plot(path_times, path_energies, color="black", linewidth=1.0, zorder=3.5, alpha=0.9, label="cfg path")
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
@@ -995,8 +990,8 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
 def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
     """BW transitions: one color-to-black cmap per BW, annotated BW region bands with SF separators."""
     print(f"Rendering BW transition heatmap{output_suffix}...")
-    fig = plt.figure(figsize=(7.16, 4))
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.001)
+    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.0014)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1083,9 +1078,6 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
                     path_energies.append(avg_e)
                     path_labels.append(f"SF{sf}_BW{bw}_TP{tp}")
             if len(path_times) >= 2:
-                print(f"  BW plot path (SF->BWs->TPs): {len(path_times)} points")
-                for idx, (t, e, lbl) in enumerate(zip(path_times, path_energies, path_labels)):
-                    print(f"    [{idx}] {lbl}: t={t:.2f} min, e={e:.2f} mJ")
                 ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
                 ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
@@ -1110,8 +1102,8 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
 def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
     """SF transitions: one color-to-black cmap per SF, annotated SF region bands with BW separators and PER stats."""
     print(f"Rendering SF transition heatmap{output_suffix}...")
-    fig = plt.figure(figsize=(7.16, 4))
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.001)
+    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.0014)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1196,9 +1188,6 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
                             path_energies.append(avg_e)
                             path_labels.append(f"SF{sf}_BW{bw}_TP{tp}")
             if len(path_times) >= 2:
-                print(f"  SF plot path (SF→BW→TP order): {len(path_times)} points")
-                for idx, (t, e, lbl) in enumerate(zip(path_times, path_energies, path_labels)):
-                    print(f"    [{idx}] {lbl}: t={t:.2f} min, e={e:.2f} mJ")
                 ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
                 ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
@@ -1222,8 +1211,8 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
 def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
     """TP transitions: one color-to-black cmap per TP, annotated SF region bands with BW separators."""
     print(f"Rendering TP transition heatmap{output_suffix}...")
-    fig = plt.figure(figsize=(7.16, 4))
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.001)
+    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.12], wspace=0.0014)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1302,13 +1291,6 @@ def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_b
                         path_times.append(first_tm)
                         path_energies.append(float(np.mean(energies)))
             if len(path_times) >= 2:
-                print(f"  TP plot path (SF,BW groups): {len(path_times)} points")
-                idx = 0
-                for sf in SF_VALUES:
-                    for bw in BW_VALUES:
-                        if idx < len(path_times):
-                            print(f"    [{idx}] SF{sf}_BW{bw}: t={path_times[idx]:.2f} min, e={path_energies[idx]:.2f} mJ")
-                            idx += 1
                 ax.plot(path_times, path_energies, color="white", linewidth=1.5, zorder=3, alpha=0.9)
                 ax.plot(path_times, path_energies, color="black", linewidth=0.8, zorder=3.5, alpha=0.9, label="cfg path")
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
