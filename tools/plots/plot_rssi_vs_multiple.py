@@ -11,7 +11,6 @@ from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.transforms import Bbox, Affine2D
 from mpl_toolkits.mplot3d import Axes3D
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -254,13 +253,17 @@ def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, in
     y_vals = np.array([p[y_axis] for p in points])
     z_vals = np.array([p[z_axis] for p in points])
     rssi_vals = np.array([p["rssi"] for p in points])
-    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
+    fig = plt.figure(figsize=(7.16, 4))
     ax = fig.add_subplot(111, projection="3d")
     sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=50, edgecolors="k", linewidths=0.3)
     labels = {"sf": "SF", "bw": "BW (kHz)", "tp": "TP (dBm)", "distance": "Distance (m)"}
-    ax.set_xlabel(labels.get(x_axis, x_axis), fontsize=IEEE_FONTSIZE)
-    ax.set_ylabel(labels.get(y_axis, y_axis), fontsize=IEEE_FONTSIZE)
-    ax.set_zlabel(labels.get(z_axis, z_axis), fontsize=IEEE_FONTSIZE)
+    ax.set_xlabel(labels.get(x_axis, x_axis), fontsize=IEEE_FONTSIZE, labelpad=2)
+    ax.set_ylabel(labels.get(y_axis, y_axis), fontsize=IEEE_FONTSIZE, labelpad=2)
+    ax.set_zlabel(labels.get(z_axis, z_axis), fontsize=IEEE_FONTSIZE, labelpad=2)
+    ax.zaxis.label.set_verticalalignment('top')
+    ax.tick_params(axis='x', pad=1)
+    ax.tick_params(axis='y', pad=1)
+    ax.tick_params(axis='z', pad=1)
     bw_khz = sorted(set(bw / 1000.0 for bw in BW_VALUES))
     distances = sorted(set(d for d, _, _, _, _ in records))
     for axis, key in [("x", x_axis), ("y", y_axis), ("z", z_axis)]:
@@ -321,7 +324,7 @@ def plot_rssi_3d_combined(records, output_png):
         ("tp", "distance", "sf", True, False),
         ("tp", "distance", "bw", True, False),
     ]
-    fig = plt.figure(figsize=(FIGSIZE_TWO_COL[0], 4.5))
+    fig = plt.figure(figsize=(7.16, 4))
     rssi_all = []
     for x_axis, y_axis, z_axis, _, _ in configs:
         pts = agg_3d(x_axis, y_axis, z_axis)
@@ -348,11 +351,15 @@ def plot_rssi_3d_combined(records, output_png):
                     break
         rssi_vals = np.array([p["rssi"] for p in pts])
         ax = fig.add_subplot(1, 3, idx + 1, projection="3d")
-        sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=35, edgecolors="k", linewidths=0.2, vmin=rssi_min, vmax=rssi_max)
+        sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=35, edgecolors="k", linewidths=0.3, vmin=rssi_min, vmax=rssi_max)
         scatter_handles.append((sc, ax, x_axis, y_axis, z_axis))
-        ax.set_xlabel(labels[x_axis], fontsize=IEEE_FONTSIZE)
-        ax.set_ylabel(labels[y_axis], fontsize=IEEE_FONTSIZE)
-        ax.set_zlabel(labels[z_axis], fontsize=IEEE_FONTSIZE)
+        ax.set_xlabel(labels[x_axis], fontsize=IEEE_FONTSIZE, labelpad=2)
+        ax.set_ylabel(labels[y_axis], fontsize=IEEE_FONTSIZE, labelpad=2)
+        ax.set_zlabel(labels[z_axis], fontsize=IEEE_FONTSIZE, labelpad=2)
+        ax.zaxis.label.set_verticalalignment('top')
+        ax.tick_params(axis='x', pad=1)
+        ax.tick_params(axis='y', pad=1)
+        ax.tick_params(axis='z', pad=1)
         for axis, key in [("x", x_axis), ("y", y_axis), ("z", z_axis)]:
             set_ticks = getattr(ax, f"set_{axis}ticks")
             set_ticklabels = getattr(ax, f"set_{axis}ticklabels")
@@ -374,28 +381,13 @@ def plot_rssi_3d_combined(records, output_png):
         if inv_y:
             ax.invert_yaxis()
 
-    fig.subplots_adjust(left=0.05, right=0.95, top=0.82, bottom=0.05, wspace=0.25)
-    cbars = []
+    fig.subplots_adjust(left=0.02, right=0.95, top=0.92, bottom=0.05, wspace=0.2)
     for sc, ax, _, _, _ in scatter_handles:
-        cbar = fig.colorbar(sc, ax=ax, location="top", orientation="horizontal", shrink=0.6, pad=0.08, aspect=30, fraction=0.04)
-        cbar.ax.invert_xaxis()
+        cbar = fig.colorbar(sc, ax=ax, location="top", orientation="horizontal",
+                            shrink=0.55, pad=0.02, aspect=25, fraction=0.05,
+                            anchor=(0, 1), panchor=(0, 1))
         cbar.set_label(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE - 1)
-        cbar.ax.tick_params(labelsize=IEEE_FONTSIZE - 2, rotation=45)
-        cbars.append(cbar)
-    fig.canvas.draw()
-    for cbar in cbars:
-        cbar_ax = cbar.ax
-        pos = cbar_ax.get_position(original=False)
-        cx, cy = pos.x0 + pos.width / 2, pos.y0 + pos.height / 2
-        t = Affine2D().translate(-cx, -cy).rotate_deg(45).translate(cx, cy)
-        orig_bbox = Bbox.from_bounds(pos.x0, pos.y0, pos.width, pos.height)
-
-        def make_locator(bbox, trans):
-            def locator(axes, renderer):
-                return trans.transform_bbox(bbox)
-            return locator
-
-        cbar_ax.set_axes_locator(make_locator(orig_bbox, t))
+        cbar.ax.tick_params(labelsize=IEEE_FONTSIZE - 2)
     fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
     print(f"Saved: {output_png}")
@@ -416,8 +408,7 @@ def main():
     args = parser.parse_args()
 
     if args.output_dir is None:
-        out_dir = "dataset_plots" if "dataset" in args.data_root else "raw_test_data_plots"
-        args.output_dir = os.path.join(WORKSPACE, "results", out_dir, "rssi")
+        args.output_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots", "rssi")
 
     setup_plot_style()
     records = collect_rssi_data(args.data_root)
