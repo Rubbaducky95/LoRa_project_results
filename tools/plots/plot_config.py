@@ -17,6 +17,9 @@ TEXTWIDTH_TWO_COL = 7.16  # inches (includes column gap)
 # Two-column figure (full width including column gap)
 FIGSIZE_TWO_COL = (TEXTWIDTH_TWO_COL, FIGURE_HEIGHT)
 
+# IEEE double-column (7.16" x 4" per How-to-plot)
+FIGSIZE_IEEE_DOUBLE = (TEXTWIDTH_TWO_COL, 4)
+
 # Single-column figure
 FIGSIZE_ONE_COL = (TEXTWIDTH_ONE_COL, FIGURE_HEIGHT)
 

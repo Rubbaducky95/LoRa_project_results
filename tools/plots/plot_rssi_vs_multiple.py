@@ -11,11 +11,13 @@ from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import transforms as mtransforms
+from matplotlib.patches import Rectangle
 from mpl_toolkits.mplot3d import Axes3D
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-from plot_config import FIGSIZE_ONE_COL, FIGSIZE_TWO_COL, IEEE_FONTSIZE, SAVE_DPI
+from plot_config import FIGSIZE_IEEE_DOUBLE, FIGSIZE_ONE_COL, FIGSIZE_TWO_COL, IEEE_FONTSIZE, SAVE_DPI
 
 CFG_RE = re.compile(r"^SF(\d+)_BW(\d+)_TP(\d+)\.csv$")
 DIST_RE = re.compile(r"^distance_([\d.]+)m?$")
@@ -233,6 +235,117 @@ def _get_axis_val(axis, distance, sf, bw, tp):
     return None
 
 
+def _nice_rssi_ticks(vmin, vmax):
+    """Pick simple 10 dBm ticks for the inset RSSI scale."""
+    lo = int(np.ceil(vmin / 10.0) * 10)
+    hi = int(np.floor(vmax / 10.0) * 10)
+    if hi <= lo:
+        return [float(vmin), 0.5 * (vmin + vmax), float(vmax)]
+    if hi == lo + 10:
+        return [lo, lo + 5, hi]
+    return [lo, 0.5 * (lo + hi), hi]
+
+
+def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=(0.02, 0.72), size=(0.34, 0.23), fontsize=None, text_angle_deg=None):
+    """Add a compact rotated gradient scale in the upper-left of a 3D axes."""
+    if fontsize is None:
+        fontsize = IEEE_FONTSIZE
+    if text_angle_deg is None:
+        text_angle_deg = angle_deg
+    ax_pos = ax.get_position()
+    scale_ax = fig.add_axes(
+        [
+            ax_pos.x0 + loc[0] * ax_pos.width,
+            ax_pos.y0 + loc[1] * ax_pos.height,
+            size[0] * ax_pos.width,
+            size[1] * ax_pos.height,
+        ],
+        zorder=20,
+    )
+    scale_ax.set_xlim(0, 1)
+    scale_ax.set_ylim(0, 1)
+    scale_ax.axis("off")
+
+    grad_x0, grad_y0 = 0.08, 0.18
+    grad_w, grad_h = 0.64, 0.12
+    tick_len = 0.07
+    tick_gap = 0.045
+    label_gap = 0.14
+    cx = grad_x0 + 0.5 * grad_w
+    cy = grad_y0 + 0.5 * grad_h
+    rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, angle_deg) + scale_ax.transAxes
+
+    gradient = np.linspace(vmin, vmax, 256).reshape(1, -1)
+    scale_ax.imshow(
+        gradient,
+        extent=(grad_x0, grad_x0 + grad_w, grad_y0, grad_y0 + grad_h),
+        origin="lower",
+        aspect="auto",
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        transform=rot,
+        interpolation="bilinear",
+        clip_on=False,
+        zorder=2,
+    )
+    scale_ax.add_patch(
+        Rectangle(
+            (grad_x0, grad_y0),
+            grad_w,
+            grad_h,
+            fill=False,
+            edgecolor="black",
+            linewidth=0.8,
+            transform=rot,
+            clip_on=False,
+            zorder=3,
+        )
+    )
+
+    for tick in _nice_rssi_ticks(vmin, vmax):
+        frac = 0.5 if vmax == vmin else (tick - vmin) / (vmax - vmin)
+        x_tick = grad_x0 + frac * grad_w
+        scale_ax.plot(
+            [x_tick, x_tick],
+            [grad_y0 + grad_h, grad_y0 + grad_h + tick_len],
+            color="black",
+            linewidth=0.8,
+            transform=rot,
+            clip_on=False,
+            zorder=4,
+        )
+        tick_text = f"{tick:.0f}" if abs(tick - round(tick)) < 1e-6 else f"{tick:.1f}"
+        scale_ax.text(
+            x_tick,
+            grad_y0 + grad_h + tick_len + tick_gap,
+            tick_text,
+            transform=rot,
+            rotation=text_angle_deg,
+            rotation_mode="anchor",
+            ha="center",
+            va="bottom",
+            fontsize=fontsize,
+            clip_on=False,
+            zorder=5,
+        )
+
+    scale_ax.text(
+        grad_x0 + 0.5 * grad_w,
+        grad_y0 + grad_h + tick_len + label_gap,
+        label,
+        transform=rot,
+        rotation=text_angle_deg,
+        rotation_mode="anchor",
+        ha="center",
+        va="bottom",
+        fontsize=fontsize,
+        clip_on=False,
+        zorder=5,
+    )
+    return scale_ax
+
+
 def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, invert_y=False):
     """3D scatter: x_axis, y_axis, z_axis as axes, color=RSSI (avg). Aggregates over the 4th dimension."""
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
@@ -253,7 +366,7 @@ def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, in
     y_vals = np.array([p[y_axis] for p in points])
     z_vals = np.array([p[z_axis] for p in points])
     rssi_vals = np.array([p["rssi"] for p in points])
-    fig = plt.figure(figsize=(7.16, 4))
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
     ax = fig.add_subplot(111, projection="3d")
     sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=50, edgecolors="k", linewidths=0.3)
     labels = {"sf": "SF", "bw": "BW (kHz)", "tp": "TP (dBm)", "distance": "Distance (m)"}
@@ -285,18 +398,134 @@ def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, in
         ax.invert_xaxis()
     if invert_y:
         ax.invert_yaxis()
-    cbar = fig.colorbar(sc, ax=ax, shrink=0.6, location="left", pad=0.001)
-    cbar.set_label(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE, rotation=90, labelpad=0.001)
-    cbar.ax.yaxis.set_ticks_position("left")
-    cbar.ax.yaxis.set_label_position("left")
-    cbar.ax.tick_params(axis="y", which="both", left=True, right=False, labelleft=True, labelright=False)
-    fig.subplots_adjust(left=0.18, right=0.95, top=0.95, bottom=0.05)
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.05)
+    _add_rotated_rssi_scale(
+        fig,
+        ax,
+        sc.cmap,
+        float(sc.norm.vmin),
+        float(sc.norm.vmax),
+        r"RSSI (avg) (dBm)",
+        angle_deg=225,
+        text_angle_deg=45,
+        loc=(0.00, 0.71),
+        size=(0.38, 0.28),
+    )
     fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
     print(f"Saved: {output_png}")
 
 
 DISTANCE_TICK_INTERVAL = 25.0
+
+
+def _config_label(sf, bw, tp):
+    """Short label for config: SF7 BW62.5 kHz TP2 -> S7/B62.5/T2."""
+    bw_khz = bw / 1000.0
+    s = f"{bw_khz:.1f}".rstrip("0").rstrip(".")
+    return f"S{sf}/B{s}/T{tp}"
+
+
+def _get_config_order():
+    """Yield (sf, bw, tp) in consistent order: SF, BW, TP."""
+    for sf in SF_VALUES:
+        for bw in BW_VALUES:
+            for tp in TP_VALUES:
+                yield (sf, bw, tp)
+
+
+def plot_rssi_config_vs_distance_heatmap(records, output_png):
+    """
+    Heatmap: x-axis = distance, y-axis = config (SF/BW/TP), color = avg RSSI.
+    RSSI is the simple per-file average from read_file_metrics.
+    """
+    os.makedirs(os.path.dirname(output_png), exist_ok=True)
+    configs = list(_get_config_order())
+    distances = sorted(set(d for d, _, _, _, _ in records))
+    cfg_to_idx = {c: i for i, c in enumerate(configs)}
+    mat = np.full((len(distances), len(configs)), np.nan)
+    for distance, sf, bw, tp, m in records:
+        cfg = (sf, bw, tp)
+        if cfg not in cfg_to_idx:
+            continue
+        d_idx = distances.index(distance)
+        c_idx = cfg_to_idx[cfg]
+        mat[d_idx, c_idx] = m["rssi_avg"]
+    mat = mat.T
+    if np.all(np.isnan(mat)):
+        return
+    rssi_min = np.nanmin(mat)
+    rssi_max = np.nanmax(mat)
+    d_arr = np.array(distances)
+    if len(distances) == 1:
+        x_edges = np.array([d_arr[0] - 1, d_arr[0], d_arr[0] + 1])
+    else:
+        half = np.diff(d_arr) / 2
+        midpoints = (d_arr[:-1] + d_arr[1:]) / 2
+        x_edges = np.concatenate(([d_arr[0] - half[0]], midpoints, [d_arr[-1] + half[-1]]))
+    y_edges = np.arange(len(configs) + 1)
+    fig, ax = plt.subplots(figsize=FIGSIZE_IEEE_DOUBLE)
+    im = ax.pcolormesh(x_edges, y_edges, mat, cmap="viridis", vmin=rssi_min, vmax=rssi_max, shading="flat")
+    ax.set_xlim(min(distances), max(distances))
+    ax.set_ylim(0, len(configs))
+    ax.set_xlabel("Distance (m)", fontsize=IEEE_FONTSIZE)
+    ax.set_ylabel("Config (SF/BW kHz/TP)", fontsize=IEEE_FONTSIZE)
+    ax.set_yticks(np.arange(len(configs)) + 0.5)
+    ax.set_yticklabels([_config_label(sf, bw, tp) for sf, bw, tp in configs])
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8, aspect=25)
+    cbar.set_label(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE)
+    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
+    ax.tick_params(axis="both", labelsize=IEEE_FONTSIZE)
+    fig.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.18)
+    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_png}")
+
+
+def plot_rssi_config_distance_energy_3d(records, output_png):
+    """
+    3D scatter: x=distance, y=config, z=energy (mJ), color=RSSI (avg).
+    Each point is one file with simple per-file avg RSSI.
+    """
+    os.makedirs(os.path.dirname(output_png), exist_ok=True)
+    configs = list(_get_config_order())
+    cfg_to_idx = {c: i for i, c in enumerate(configs)}
+    points = []
+    for distance, sf, bw, tp, m in records:
+        cfg = (sf, bw, tp)
+        if cfg not in cfg_to_idx:
+            continue
+        energy = m.get("energy_mj")
+        if energy is None or energy <= 0:
+            continue
+        points.append((distance, cfg_to_idx[cfg], energy, m["rssi_avg"]))
+    if not points:
+        return
+    x_vals = np.array([p[0] for p in points])
+    y_vals = np.array([p[1] for p in points])
+    z_vals = np.array([p[2] for p in points])
+    rssi_vals = np.array([p[3] for p in points])
+    rssi_min, rssi_max = rssi_vals.min(), rssi_vals.max()
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    ax = fig.add_subplot(111, projection="3d")
+    sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=25, edgecolors="k", linewidths=0.2,
+                    vmin=rssi_min, vmax=rssi_max)
+    ax.set_xlabel("Distance (m)", fontsize=IEEE_FONTSIZE, labelpad=2)
+    ax.set_ylabel("Config", fontsize=IEEE_FONTSIZE, labelpad=2)
+    ax.set_zlabel("Energy (mJ)", fontsize=IEEE_FONTSIZE, labelpad=2)
+    ax.zaxis.label.set_verticalalignment("top")
+    ax.tick_params(axis="x", pad=1)
+    ax.tick_params(axis="y", pad=1)
+    ax.tick_params(axis="z", pad=1)
+    ax.set_yticks(np.arange(len(configs)))
+    ax.set_yticklabels([_config_label(sf, bw, tp) for sf, bw, tp in configs])
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.6, aspect=20)
+    cbar.set_label(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE)
+    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
+    fig.subplots_adjust(left=0.02, right=0.92, top=0.95, bottom=0.05)
+    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_png}")
 
 
 def plot_rssi_3d_combined(records, output_png):
@@ -324,7 +553,7 @@ def plot_rssi_3d_combined(records, output_png):
         ("tp", "distance", "sf", True, False),
         ("tp", "distance", "bw", True, False),
     ]
-    fig = plt.figure(figsize=(7.16, 4))
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
     rssi_all = []
     for x_axis, y_axis, z_axis, _, _ in configs:
         pts = agg_3d(x_axis, y_axis, z_axis)
@@ -383,11 +612,19 @@ def plot_rssi_3d_combined(records, output_png):
 
     fig.subplots_adjust(left=0.02, right=0.95, top=0.92, bottom=0.05, wspace=0.2)
     for sc, ax, _, _, _ in scatter_handles:
-        cbar = fig.colorbar(sc, ax=ax, location="top", orientation="horizontal",
-                            shrink=0.55, pad=0.02, aspect=25, fraction=0.05,
-                            anchor=(0, 1), panchor=(0, 1))
-        cbar.set_label(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE - 1)
-        cbar.ax.tick_params(labelsize=IEEE_FONTSIZE - 2)
+        _add_rotated_rssi_scale(
+            fig,
+            ax,
+            sc.cmap,
+            float(sc.norm.vmin),
+            float(sc.norm.vmax),
+            r"RSSI (avg) (dBm)",
+            angle_deg=225,
+            text_angle_deg=45,
+            loc=(0.00, 0.71),
+            size=(0.42, 0.28),
+            fontsize=IEEE_FONTSIZE,
+        )
     fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
     print(f"Saved: {output_png}")
@@ -416,6 +653,8 @@ def main():
         raise RuntimeError("No RSSI data found.")
 
     plot_rssi_3d_combined(records, os.path.join(args.output_dir, "raw_rssi_3d_combined.png"))
+    plot_rssi_config_vs_distance_heatmap(records, os.path.join(args.output_dir, "raw_rssi_config_vs_distance.png"))
+    plot_rssi_config_distance_energy_3d(records, os.path.join(args.output_dir, "raw_rssi_config_distance_energy_3d.png"))
 
 
 if __name__ == "__main__":
