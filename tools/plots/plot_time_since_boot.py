@@ -74,7 +74,7 @@ def get_file_order():
 def format_sf_bw_label(raw_label):
     """Convert 'SF7 BW62.5' or 'SF7_BW62.5' to '7, 62.5'."""
     s = raw_label.replace("_", " ")
-    m = re.match(r"SF(\d+)\s*BW([\d.]+)", s)
+    m = re.match(r"(SF(\d+)\s*BW([\d.]+))", s)
     if m:
         return f"{m.group(1)}, {m.group(2)}"
     return s
@@ -227,68 +227,6 @@ def main():
     out_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots", "cfg_vs_time")
     os.makedirs(out_dir, exist_ok=True)
 
-    # # raw_time_since_transmission_init.png (commented out)
-    # fig, axes = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), sharex=False, sharey=False, squeeze=False)
-    # for ax in axes.flat:
-    #     ax.set_visible(False)
-    # for i, dn in enumerate(dist_folders):
-    #     dpath = os.path.join(DATA_ROOT, dn)
-    #     distance = parse_distance(dn)
-    #     if distance is None:
-    #         continue
-    #     row, col = i // ncols, i % ncols
-    #     ax = axes[row, col]
-    #     ax.set_visible(True)
-    #     indices, times, config_ids = collect_times_for_distance(dpath)
-    #     if len(indices) == 0:
-    #         continue
-    #     sigma = min(5, max(1, len(times) // 100))
-    #     times_smooth = gaussian_smooth(times, sigma=sigma)
-    #     ax.plot(indices, times_smooth / 1000, "b-", linewidth=1.2, alpha=0.9)
-    #     ax.set_title(dn, fontsize=9)
-    #     ax.set_xlabel("Packet index")
-    #     ax.set_ylabel("time_since_transmission_init (s)")
-    #     ax.grid(True, alpha=0.3)
-    # fig.suptitle("time_since_transmission_init_ms", fontsize=11)
-    # fig.tight_layout()
-    # fig.savefig(os.path.join(out_dir, "raw_time_since_transmission_init.png"), dpi=220, bbox_inches="tight")
-    # plt.close()
-    # print("Saved: raw_time_since_transmission_init.png")
-
-    # # raw_time_since_boot.png (commented out)
-    # fig2, axes2 = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), sharex=False, sharey=False, squeeze=False)
-    # for ax in axes2.flat:
-    #     ax.set_visible(False)
-    # for i, dn in enumerate(dist_folders):
-    #     dpath = os.path.join(DATA_ROOT, dn)
-    #     if parse_distance(dn) is None:
-    #         continue
-    #     row, col = i // ncols, i % ncols
-    #     ax = axes2[row, col]
-    #     ax.set_visible(True)
-    #     indices, times, _ = collect_times_for_distance(dpath, time_col="time_since_boot_ms")
-    #     if len(indices) == 0:
-    #         continue
-    #     sigma = min(5, max(1, len(times) // 100))
-    #     times_smooth = gaussian_smooth(times, sigma=sigma)
-    #     ax.plot(indices, times_smooth / 1000, "b-", linewidth=1.2, alpha=0.9)
-    #     resets = reset_by_dist.get(dn, [])
-    #     for pkt_idx, prev_ms, curr_ms in resets:
-    #         if 0 <= pkt_idx < len(indices):
-    #             ax.axvline(x=pkt_idx, color="r", linestyle="--", linewidth=0.8, alpha=0.6)
-    #     if resets:
-    #         ax.text(0.02, 0.98, f"{len(resets)} fixes", transform=ax.transAxes, fontsize=8, va="top",
-    #                 bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8))
-    #     ax.set_title(dn, fontsize=9)
-    #     ax.set_xlabel("Packet index")
-    #     ax.set_ylabel("time_since_boot (s)")
-    #     ax.grid(True, alpha=0.3)
-    # fig2.suptitle("time_since_boot_ms: dotted lines = inconsistency locations", fontsize=11)
-    # fig2.tight_layout()
-    # fig2.savefig(os.path.join(out_dir, "raw_time_since_boot.png"), dpi=220, bbox_inches="tight")
-    # plt.close()
-    # print("Saved: raw_time_since_boot.png")
-
     # Combined plot v1: averaged across distances, config labels on X-axis, dotted lines cut at curve
     dist_data, sf_bw_changes, all_config_entries = collect_times_all_distances_overlaid()
     if dist_data:
@@ -306,35 +244,12 @@ def main():
         xtick_positions = [0] + [p for p, _, _ in sf_bw_changes]
         xtick_labels = [l.replace("_", " ") for l in ["SF7_BW62.5"] + [lbl for _, lbl, _ in sf_bw_changes]]
 
-        # # Combined plot v1 (commented out)
-        # TEXTWIDTH_IN = 3.5
-        # fig3, ax3 = plt.subplots(figsize=(2 * TEXTWIDTH_IN, 4))
-        # ax3.plot(indices_avg, times_smooth / 1000, "b-", linewidth=1.5, alpha=0.9)
-        # ax3.set_xticks(xtick_positions)
-        # ax3.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=9)
-        # ymin = ax3.get_ylim()[0]
-        # dotted_positions = [0] + [p for p, _, _ in sf_bw_changes]
-        # for pkt_idx in dotted_positions:
-        #     y_at_curve = np.interp(pkt_idx, indices_avg, times_smooth / 1000)
-        #     ax3.plot([pkt_idx, pkt_idx], [ymin, y_at_curve], color="gray", linestyle="--", linewidth=0.8, alpha=0.7)
-        # ax3.set_xlabel("Config (300 packets between changes)", fontsize=10)
-        # ax3.set_ylabel("Time since first packet sent (s)", fontsize=10)
-        # ax3.tick_params(axis="y", labelsize=9)
-        # xmax = ax3.get_xlim()[1]
-        # ax3.set_xlim(xmax=xmax - 300)
-        # ax3.yaxis.set_major_formatter(plt.FuncFormatter(e3_format))
-        # ax3.grid(True, alpha=0.3)
-        # fig3.tight_layout()
-        # fig3.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v1.png"), dpi=220, bbox_inches="tight")
-        # plt.close()
-        # print("Saved: raw_time_since_transmission_init_combined_v1.png")
-
         # Combined plot v3: packet index on X-axis, dotted lines from curve up, labels black and rotated
         FONTSIZE = IEEE_FONTSIZE
         dotted_positions = [0] + [p for p, _, _ in sf_bw_changes]
         fig4, ax4 = plt.subplots(figsize=FIGSIZE_TWO_COL)
         ax4.plot(indices_avg, times_smooth / 1000, "b-", linewidth=2.2, alpha=0.9)
-        ax4.set_xlabel("Packet index", fontsize=FONTSIZE)
+        ax4.set_xlabel("Packet idx (300 pkt/cfg)", fontsize=FONTSIZE)
         ax4.set_ylabel(r"$T_{\mathrm{init}}$ = Time since first packet sent (s)", fontsize=FONTSIZE)
         ax4.tick_params(axis="both", labelsize=FONTSIZE)
         xmax = ax4.get_xlim()[1]
@@ -343,28 +258,76 @@ def main():
         ax4.grid(True, alpha=0.3)
         ymax = ax4.get_ylim()[1]
         ymin = ax4.get_ylim()[0]
-        line_height_short = 0.14 * (ymax - ymin)  # increased: more room above
-        line_height_tall = 0.32 * (ymax - ymin)
-        line_height_short_below = 0.12 * (ymax - ymin)
-        line_height_tall_below = 0.30 * (ymax - ymin)
-        timestamp_extension = 0.06 * (ymax - ymin)  # extra segment for timestamp above
         y_range = ymax - ymin
-        ts_line_end_offset_above = 0.015 * y_range  # line ends a bit below timestamp (pos unchanged)
-        y_ts_odd_above = ymax - 0.10 * y_range
-        y_ts_even_above = ymax - 0.18 * y_range
-        y_ts_odd_below = ymin + 0.15 * y_range
-        y_ts_even_below = ymin + 0.07 * y_range
-        ts_line_start_offset_below = 0.015 * y_range  # line starts a bit above timestamp (pos unchanged)
-        y_cfg_odd_above = ymax - 0.28 * y_range
-        y_cfg_even_above = ymax - 0.46 * y_range
-        y_cfg_odd_below = ymin + 0.43 * y_range
-        y_cfg_even_below = ymin + 0.25 * y_range
-        # Measure config text box height (representative label)
-        _t = ax4.text(0, 0, "7, 62.5", fontsize=FONTSIZE, rotation=45, va="center", ha="center", transform=ax4.transData)
-        fig4.canvas.draw()
-        _bb = _t.get_window_extent(renderer=fig4.canvas.get_renderer()).transformed(ax4.transData.inverted())
-        config_text_height = abs(_bb.height)
-        _t.remove()
+        cfg_box_style = dict(
+            boxstyle="round,pad=0.06",
+            facecolor="#dbe7f3",
+            edgecolor="#2f3e4e",
+            linewidth=1.0,
+            alpha=0.95,
+        )
+        ts_box_style = dict(
+            boxstyle="round,pad=0.08",
+            facecolor="#e7efcf",
+            edgecolor="#2f3e4e",
+            linewidth=1.0,
+            alpha=0.95,
+        )
+        connector_style = dict(color="#7a7a7a", linestyle="--", linewidth=0.8, alpha=0.75, zorder=10)
+        cfg_rotation_above = 45
+        cfg_rotation_below = 50
+
+        def measure_box_height(sample_text, rotation, bbox_style):
+            probe = ax4.text(
+                0,
+                0,
+                sample_text,
+                fontsize=FONTSIZE,
+                rotation=rotation,
+                va="center",
+                ha="center",
+                transform=ax4.transData,
+                bbox=bbox_style,
+            )
+            fig4.canvas.draw()
+            bbox = probe.get_window_extent(renderer=fig4.canvas.get_renderer()).transformed(ax4.transData.inverted())
+            probe.remove()
+            return abs(bbox.height)
+
+        config_text_height_above = measure_box_height("7, 62.5", cfg_rotation_above, cfg_box_style)
+        config_text_height_below = measure_box_height("12, 500", cfg_rotation_below, cfg_box_style)
+        timestamp_text_height = measure_box_height("20.0e3", 0, ts_box_style)
+
+        top_margin = 0.04 * y_range
+        bottom_margin = 0.04 * y_range
+        row_gap = max(0.02 * y_range, 0.55 * timestamp_text_height)
+        block_gap = max(0.03 * y_range, 0.75 * timestamp_text_height)
+        ts_line_end_offset_above = 0.18 * timestamp_text_height
+        ts_line_start_offset_below = 0.18 * timestamp_text_height
+
+        y_ts_odd_above = ymax - top_margin - 0.5 * timestamp_text_height
+        y_ts_even_above = y_ts_odd_above - (timestamp_text_height + row_gap)
+        y_cfg_odd_above = y_ts_even_above - (0.5 * timestamp_text_height + 0.5 * config_text_height_above + block_gap)
+        y_cfg_even_above = y_cfg_odd_above - (config_text_height_above + row_gap)
+
+        y_ts_even_below = ymin + bottom_margin + 0.5 * timestamp_text_height
+        y_ts_odd_below = y_ts_even_below + (timestamp_text_height + row_gap)
+        y_cfg_even_below = y_ts_odd_below + (0.5 * timestamp_text_height + 0.5 * config_text_height_below + block_gap)
+        y_cfg_odd_below = y_cfg_even_below + (config_text_height_below + row_gap)
+
+        above_ts_shift = max(0.02 * y_range, 0.45 * timestamp_text_height)
+        below_ts_shift = max(0.015 * y_range, 0.30 * timestamp_text_height)
+        below_cfg_drop_even = max(0.025 * y_range, 0.22 * config_text_height_below)
+        below_cfg_drop_odd = max(0.015 * y_range, 0.10 * config_text_height_below)
+        last_above_cfg_raise = 0.38 * config_text_height_above
+        second_last_above_cfg_raise = 0.22 * config_text_height_above
+
+        y_ts_odd_above -= above_ts_shift
+        y_ts_even_above -= above_ts_shift
+        y_ts_odd_below += below_ts_shift
+        y_ts_even_below += below_ts_shift
+        y_cfg_even_below -= below_cfg_drop_even
+        y_cfg_odd_below -= below_cfg_drop_odd
         n_configs = len(dotted_positions)
         half = n_configs // 2 + 4  # move one more from below to above
         dotted_with_labels = list(zip(dotted_positions, [format_sf_bw_label(l) for l in ["SF7_BW62.5"] + [lbl for _, lbl, _ in sf_bw_changes]]))
@@ -379,45 +342,36 @@ def main():
             else:
                 ts_str = f" {y_at_curve:.0f} "
             if i < half:
-                line_height_base = line_height_tall if i % 2 == 1 else line_height_short
-                ts_ext = -config_text_height * 0.3 if i == half - 1 else timestamp_extension  # last of above: much shorter timestamp line
-                total_line = line_height_base + config_text_height + ts_ext
-            else:
-                # Below: start with short; last 3 use room below (taller)
-                below_idx = i - half
-                is_last_three = i >= n_configs - 3
-                if is_last_three:
-                    line_height_base = 0.38 * (ymax - ymin)  # use room below
-                else:
-                    line_height_base = (line_height_short_below if below_idx % 2 == 0 else line_height_tall_below)
-                total_line = line_height_base + config_text_height
-            if i < half:
                 y_label = y_cfg_odd_above if i % 2 == 1 else y_cfg_even_above
+                if i == half - 1:
+                    y_label += last_above_cfg_raise
+                elif i == half - 2:
+                    y_label += second_last_above_cfg_raise
                 y_end = y_ts_odd_above if i % 2 == 1 else y_ts_even_above
-                cfg_lo = y_label - config_text_height * 0.4
-                cfg_hi = y_label + config_text_height * 0.4
-                y_line_end = y_end - ts_line_end_offset_above  # line stops below timestamp
-                ax4.plot([pkt_idx, pkt_idx], [y_at_curve, cfg_lo], color="gray", linestyle="--", linewidth=0.8, alpha=0.7, zorder=10)
-                ax4.plot([pkt_idx, pkt_idx], [cfg_hi, y_line_end], color="gray", linestyle="--", linewidth=0.8, alpha=0.7, zorder=10)
-                ax4.text(pkt_idx, y_label, label, fontsize=FONTSIZE, rotation=45, va="center", ha="center", color="black",
-                         bbox=dict(boxstyle="round,pad=0.1", facecolor="lightgray", edgecolor="black", alpha=0.9))
+                cfg_lo = y_label - config_text_height_above * 0.4
+                cfg_hi = y_label + config_text_height_above * 0.4
+                y_line_end = y_end - ts_line_end_offset_above
+                ax4.plot([pkt_idx, pkt_idx], [y_at_curve, cfg_lo], **connector_style)
+                ax4.plot([pkt_idx, pkt_idx], [cfg_hi, y_line_end], **connector_style)
+                ax4.text(pkt_idx, y_label, label, fontsize=FONTSIZE, rotation=cfg_rotation_above, va="center", ha="center", color="black",
+                         bbox=cfg_box_style)
                 ax4.text(pkt_idx, y_end, ts_str, fontsize=FONTSIZE, va="bottom", ha="center", color="black",
-                         bbox=dict(boxstyle="round,pad=0.1", facecolor="yellow", edgecolor="black", alpha=0.9))
+                         bbox=ts_box_style)
             else:
                 y_label = y_cfg_odd_below if i % 2 == 1 else y_cfg_even_below
                 y_end = y_ts_odd_below if i % 2 == 1 else y_ts_even_below
-                cfg_lo = y_label - config_text_height * 0.4
-                cfg_hi = y_label + config_text_height * 0.4
+                cfg_lo = y_label - config_text_height_below * 0.4
+                cfg_hi = y_label + config_text_height_below * 0.4
                 y_line_start = y_end + ts_line_start_offset_below
-                ax4.plot([pkt_idx, pkt_idx], [y_line_start, cfg_lo], color="gray", linestyle="--", linewidth=0.8, alpha=0.7, zorder=10)
-                ax4.plot([pkt_idx, pkt_idx], [cfg_hi, y_at_curve], color="gray", linestyle="--", linewidth=0.8, alpha=0.7, zorder=10)
-                ax4.text(pkt_idx, y_label, label, fontsize=FONTSIZE, rotation=45, va="center", ha="center", color="black",
-                         bbox=dict(boxstyle="round,pad=0.1", facecolor="lightgray", edgecolor="black", alpha=0.9))
+                ax4.plot([pkt_idx, pkt_idx], [y_line_start, cfg_lo], **connector_style)
+                ax4.plot([pkt_idx, pkt_idx], [cfg_hi, y_at_curve], **connector_style)
+                ax4.text(pkt_idx, y_label, label, fontsize=FONTSIZE, rotation=cfg_rotation_below, va="center", ha="center", color="black",
+                         bbox=cfg_box_style)
                 ax4.text(pkt_idx, y_end, ts_str, fontsize=FONTSIZE, va="top", ha="center", color="black",
-                         bbox=dict(boxstyle="round,pad=0.1", facecolor="yellow", edgecolor="black", alpha=0.9))
+                         bbox=ts_box_style)
         legend_elements = [
-            Patch(facecolor="lightgray", edgecolor="black", label="SF, BW"),
-            Patch(facecolor="yellow", edgecolor="black", label=r"$T_{\mathrm{init}}$ at config"),
+            Patch(facecolor=cfg_box_style["facecolor"], edgecolor=cfg_box_style["edgecolor"], label="SF, BW"),
+            Patch(facecolor=ts_box_style["facecolor"], edgecolor=ts_box_style["edgecolor"], label=r"$T_{\mathrm{init}}$ at config"),
         ]
         ax4.legend(handles=legend_elements, loc="upper right", fontsize=FONTSIZE)
         fig4.tight_layout()

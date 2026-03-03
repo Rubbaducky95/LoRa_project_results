@@ -23,7 +23,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 BG_DARK = "#e8e8e8"  # light grey axes background
 
-from plot_config import IEEE_FONTSIZE, FIGSIZE_TWO_COL, FIGSIZE_ONE_COL, SAVE_DPI
+from plot_config import IEEE_FONTSIZE, FIGSIZE_TWO_COL, FIGSIZE_ONE_COL, SAVE_DPI, TEXTWIDTH_ONE_COL, TEXTWIDTH_TWO_COL
 # Smaller font for config switch markers (S0, B0, etc.) inside the plot
 MARKER_FONTSIZE = 7
 from plot_per_vs_multiple_configs import (
@@ -679,46 +679,53 @@ def _normalize_figure_fonts(fig):
         obj.set_fontsize(IEEE_FONTSIZE)
 
 
-def _add_legend_labels(ax, labels, unit=None, pad=0, label_y=None, unit_y=None, label_va="bottom", unit_va="bottom", fontsize=None):
+def _add_legend_labels(ax, labels, unit=None, pad=0.0, label_y=None, unit_y=None, label_va="top", unit_va="bottom", fontsize=None, unit_parens=None, label_y_offsets=None):
     """Draw rotated labels in the strip below the colorbars."""
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
     n = len(labels)
+    rotation = 0
     if label_y is None:
-        label_y = 0.18 if unit else 0.03
+        label_y = 1.0
     if unit_y is None:
-        unit_y = 0.03
+        unit_y = 0.0
     if fontsize is None:
         fontsize = IEEE_FONTSIZE
+    if label_y_offsets is None:
+        label_y_offsets = [0.0] * n
     if n > 0:
         for i in range(n):
             if pad > 0 and n > 1:
                 x = pad + (i / (n - 1)) * (1 - 2 * pad)
             else:
                 x = (i + 0.5) / n
-            ax.text(
+            txt = ax.text(
                 x,
-                label_y,
+                label_y + label_y_offsets[i],
                 labels[i],
                 ha="center",
                 va=label_va,
                 fontsize=fontsize,
                 transform=ax.transAxes,
-                rotation=90,
+                rotation=rotation,
                 clip_on=False,
             )
+            txt.set_gid("scale_label")
     if unit:
-        ax.text(
+        if unit_parens is None:
+            unit_parens = unit_y < label_y
+        txt = ax.text(
             0.5,
             unit_y,
-            f"({unit})",
+            f"({unit})" if unit_parens else unit,
             ha="center",
             va=unit_va,
             fontsize=fontsize,
             transform=ax.transAxes,
             clip_on=False,
         )
+        txt.set_gid("scale_unit")
 
 
 def _tighten_scale_label_gap(fig, n_cbars, gap_reduce=0.05, start_ax=1):
@@ -746,12 +753,15 @@ def _shift_scale_labels_down(fig, n_cbars, shift=0.06, start_ax=1):
 def _pull_scales_closer(fig, n_cbars, shift_left=0.14, start_ax=1):
     """Move colorbar axes left to reduce gap between plot and scales."""
     cbar_axes = fig.axes[start_ax:start_ax + n_cbars]
-    ax_legend = fig.axes[start_ax + n_cbars]
+    # Only try to move legend axis if it exists (n_cbars > 1 or enough axes)
     for cax in cbar_axes:
         pos = cax.get_position()
         cax.set_position([pos.x0 - shift_left, pos.y0, pos.width, pos.height])
-    leg_pos = ax_legend.get_position()
-    ax_legend.set_position([leg_pos.x0 - shift_left, leg_pos.y0, leg_pos.width, leg_pos.height])
+    legend_idx = start_ax + n_cbars
+    if legend_idx < len(fig.axes):
+        ax_legend = fig.axes[legend_idx]
+        leg_pos = ax_legend.get_position()
+        ax_legend.set_position([leg_pos.x0 - shift_left, leg_pos.y0, leg_pos.width, leg_pos.height])
 
 
 def _reserve_bottom_space_for_scale_labels(ax, extra=0.05):
@@ -766,7 +776,10 @@ def _add_param_colorbars(fig, gs_cbars, values, log_vmin, vmax):
     norm = LogNorm(vmin=log_vmin, vmax=vmax)
     for i in range(n):
         cax = fig.add_subplot(gs_cbars[i])
-        cmap = _color_to_black_cmap(_BASE_CMAPS[i % len(_BASE_CMAPS)], f"cb_{i}")
+        if n == 1:
+            cmap = _color_to_black_cmap(_BASE_CMAPS[-1], "cb_single")
+        else:
+            cmap = _color_to_black_cmap(_BASE_CMAPS[i % len(_BASE_CMAPS)], f"cb_{i}")
         sm = ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
@@ -778,14 +791,14 @@ def _add_param_colorbars(fig, gs_cbars, values, log_vmin, vmax):
             cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
 
 
-def _add_labels_inside_colorbars(fig, labels, start_ax=1, y=0.01, fontsize=None, color="black", stroke_color=None):
+def _add_labels_inside_colorbars(fig, labels, start_ax=1, x=0.65, y=0.01, fontsize=None, color="black", stroke_color=None):
     """Place one rotated label inside each colorbar axis, centered vertically."""
     if fontsize is None:
         fontsize = IEEE_FONTSIZE
     for i, label in enumerate(labels):
         cax = fig.axes[start_ax + i]
         txt = cax.text(
-            0.5,
+            x,
             y,
             label,
             ha="center",
@@ -811,19 +824,51 @@ def _align_colorbars_to_plot(fig, n_cbars, start_ax=1):
         cax.set_position([pos.x0, y0, pos.width, height])
 
 
-def _position_scale_label_strip(fig, n_cbars, bottom=0.03, gap=0.01, start_ax=1):
+def _position_scale_label_strip(fig, n_cbars, bottom=0.0, gap=0.01, start_ax=1):
     """Place the label strip directly below the colorbars, fully inside the figure."""
     ax_main = fig.axes[0]
+    label = ax_main.xaxis.label
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    bbox = label.get_window_extent(renderer=renderer)
     cbar_axes = fig.axes[start_ax:start_ax + n_cbars]
-    ax_legend = fig.axes[start_ax + n_cbars]
+    legend_idx = start_ax + n_cbars
     if not cbar_axes:
         return
     main_pos = ax_main.get_position()
     x0 = min(ax.get_position().x0 for ax in cbar_axes)
     x1 = max(ax.get_position().x0 + ax.get_position().width for ax in cbar_axes)
-    y0 = bottom
+    y0 = ax_main.figure.transFigure.inverted().transform((bbox.x0, bbox.y0))[1]
     y1 = max(bottom + 0.04, main_pos.y0 - gap)
-    ax_legend.set_position([x0, y0, x1 - x0, y1 - y0])
+    if legend_idx < len(fig.axes):
+        ax_legend = fig.axes[legend_idx]
+        ax_legend.set_position([x0, y0, x1 - x0, y1 - y0])
+
+
+def _align_scale_unit_with_xlabel(fig, n_cbars, start_ax=1):
+    """Align the scale-strip unit text with the main x-axis label when the strip also contains labels."""
+    legend_idx = start_ax + n_cbars
+    if legend_idx >= len(fig.axes):
+        return
+    ax_main = fig.axes[0]
+    ax_legend = fig.axes[legend_idx]
+    label_texts = [txt for txt in ax_legend.texts if txt.get_gid() == "scale_label"]
+    unit_text = next((txt for txt in ax_legend.texts if txt.get_gid() == "scale_unit"), None)
+    if not label_texts or unit_text is None:
+        return
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    bbox = ax_main.xaxis.label.get_window_extent(renderer=renderer)
+    x_center = 0.5 * (bbox.x0 + bbox.x1)
+    y_center = 0.5 * (bbox.y0 + bbox.y1)
+    target_y = ax_main.figure.transFigure.inverted().transform((x_center, y_center))[1]
+    leg_pos = ax_legend.get_position()
+    if leg_pos.height <= 0:
+        return
+    unit_y = (target_y - leg_pos.y0) / leg_pos.height
+    unit_y = min(max(unit_y, 0.0), 1.0)
+    unit_text.set_position((0.5, unit_y))
+    unit_text.set_verticalalignment("center")
 
 
 def _add_per_label_above_colorbars(fig, n_cbars, start_ax=1):
@@ -848,16 +893,16 @@ def _add_per_label_above_colorbars(fig, n_cbars, start_ax=1):
 def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins, energy_bins, mat, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, cmap, suffix="", pts=None):
     """Combined PER heatmap with annotated SF/BW config regions showing performance-energy patterns."""
     print(f"Rendering combined heatmap{suffix}...")
-    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.26], wspace=0.48)
     ax = fig.add_subplot(gs[0])
+    _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
-    for spine in ax.spines.values():
-        spine.set_color("black")
     ax.tick_params(axis="both", colors="black", labelsize=IEEE_FONTSIZE)
     ax.xaxis.label.set_color("black")
     ax.yaxis.label.set_color("black")
-
+    for spine in ax.spines.values():
+        spine.set_color("black")
     # Draw PER heatmap
     scaled = np.where(np.isnan(mat), np.nan, np.maximum(mat * 0.2, log_vmin))
     mat_masked = np.ma.masked_where(np.isnan(mat), scaled)
@@ -966,15 +1011,12 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
                           borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
 
-    # Compact colorbar
+    """ # Compact colorbar
     cax = fig.add_subplot(gs[1])
     cbar = fig.colorbar(im, cax=cax, orientation="vertical")
-    cbar.outline.set_linewidth(0.5)
+    cbar.outline.set_linewidth(0.9)
     cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
     _align_colorbars_to_plot(fig, 1)
-    # Pull colorbar closer to plot (manual shift — combined plot has no legend axis)
-    cax_pos = cax.get_position()
-    cax.set_position([cax_pos.x0 - 0.15, cax_pos.y0, cax_pos.width, cax_pos.height])
 
     # PER label below the colorbar, aligned with x-axis tick values
     ax_pos = ax.get_position()
@@ -982,8 +1024,20 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
     # Align with x-axis tick labels (at plot bottom)
     y_xlabel = ax_pos.y0 - 0.02
     fig.text(cax_pos2.x0 + cax_pos2.width / 2, y_xlabel, "PER (%)",
-             ha="center", va="top", fontsize=IEEE_FONTSIZE, color="black")
+             ha="center", va="top", fontsize=IEEE_FONTSIZE, color="black") """
 
+    gs_right =gs[1].subgridspec(2, 1, height_ratios=[0.64, 0.36], hspace=0.0)
+    gs_cbar = gs_right[0].subgridspec(1, 1, wspace=0.03)
+    sm = ScalarMappable(cmap=cmap, norm=LogNorm(vmin=log_vmin, vmax=vmax))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=fig.add_subplot(gs_cbar[0]), orientation="vertical")
+    cbar.outline.set_linewidth(0.9)
+    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
+    ax_leg = fig.add_subplot(gs_right[1])
+    _add_legend_labels(ax_leg, [], unit="PER (%)", unit_y=0.88, unit_va="top", fontsize=IEEE_FONTSIZE, unit_parens=False)
+    _pull_scales_closer(fig, 1)
+    _align_colorbars_to_plot(fig, 1)
+    _position_scale_label_strip(fig, 1, bottom=0.03)
     _normalize_figure_fonts(fig)
     fname = f"raw_per_gradient_energy_vs_time{suffix}.png" if suffix else "raw_per_gradient_energy_vs_time.png"
     fig.savefig(os.path.join(output_dir, fname), dpi=220, bbox_inches="tight")
@@ -994,8 +1048,8 @@ def plot_combined_heatmap(output_dir, config_dir, data_root, filters, time_bins,
 def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
     """BW transitions: one color-to-black cmap per BW, annotated BW region bands with SF separators."""
     print(f"Rendering BW transition heatmap{output_suffix}...")
-    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0.0)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.26], wspace=0.48)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1062,7 +1116,12 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
             if i > 0 and ts >= t_min:
                 ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
             # SF label vertical inside upper-left of band (lowered)
-            x_label = ts_c + (t_max - t_min) * 0.01
+            if i < 3:
+                x_label = ts_c + (t_max - t_min) * 0.028
+                if i < 1:
+                    x_label = ts_c + (t_max - t_min) * 0.010
+            else:
+                x_label = ts_c + (t_max - t_min) * 0.012
             y_label = e_max - e_range * 0.01
             txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
                          fontsize=IEEE_FONTSIZE, color="black", zorder=6,
@@ -1087,13 +1146,14 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
                           borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
 
+
     labels_bw = [f"BW{bw/1000:.1f}".replace(".0", "") for bw in BW_VALUES]
     gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.64, 0.36], hspace=0)
-    gs_cbars = gs_right[0].subgridspec(1, len(BW_VALUES), wspace=0.02)
+    gs_cbars = gs_right[0].subgridspec(1, len(BW_VALUES), wspace=0.0)
     _add_param_colorbars(fig, gs_cbars, BW_VALUES, log_vmin, vmax)
     ax_leg = fig.add_subplot(gs_right[1])
     _add_labels_inside_colorbars(fig, labels_bw, color="black")
-    _add_legend_labels(ax_leg, [], unit="kHz", unit_y=0.88, unit_va="top")
+    _add_legend_labels(ax_leg, [], unit="kHz", unit_y=0.88, unit_va="top", fontsize=IEEE_FONTSIZE)
     _pull_scales_closer(fig, len(BW_VALUES))
     _align_colorbars_to_plot(fig, len(BW_VALUES))
     _position_scale_label_strip(fig, len(BW_VALUES), bottom=0.02, gap=0.008)
@@ -1106,8 +1166,8 @@ def plot_param_transitions_bw(output_dir, config_dir, data_root, filters, time_b
 def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_bins, energy_bins, t_min, t_max, e_min, e_max, vmin, vmax, log_vmin, build_matrix_fn, mat_combined=None, output_suffix="", pts=None):
     """SF transitions: one color-to-black cmap per SF, annotated SF region bands with BW separators and PER stats."""
     print(f"Rendering SF transition heatmap{output_suffix}...")
-    fig = plt.figure(figsize=FIGSIZE_TWO_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0.0)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.26], wspace=0.48)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1159,7 +1219,12 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
                 ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
 
             # SF label vertical inside upper-left of band (lowered)
-            x_label = ts_c + (t_max - t_min) * 0.01
+            if i < 3:
+                x_label = ts_c + (t_max - t_min) * 0.028
+                if i < 1:
+                    x_label = ts_c + (t_max - t_min) * 0.010
+            else:
+                x_label = ts_c + (t_max - t_min) * 0.012
             y_label = e_max - e_range * 0.01
             txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
                          fontsize=IEEE_FONTSIZE, color="black", zorder=6,
@@ -1197,15 +1262,17 @@ def plot_param_transitions_sf(output_dir, config_dir, data_root, filters, time_b
                 ax.legend(loc="lower right", fontsize=IEEE_FONTSIZE - 1, framealpha=0.8, edgecolor="none",
                           borderpad=0.2, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2)
 
-    labels_sf = [f"SF{sf}" for sf in SF_VALUES]
+    labels_sf = [f"{sf}" for sf in SF_VALUES]
     gs_right = gs[1].subgridspec(2, 1, height_ratios=[0.64, 0.36], hspace=0)
     gs_cbars = gs_right[0].subgridspec(1, len(SF_VALUES), wspace=0.03)
     _add_param_colorbars(fig, gs_cbars, SF_VALUES, log_vmin, vmax)
     ax_leg = fig.add_subplot(gs_right[1])
-    _add_legend_labels(ax_leg, labels_sf, pad=0.02, label_y=0.98, label_va="top")
+    stagger_offsets = [0.0 if i % 2 == 0 else -0.25 for i in range(len(labels_sf))]
+    _add_legend_labels(ax_leg, labels_sf, unit="SF", pad=0.001, unit_parens=False, label_y_offsets=stagger_offsets)
     _pull_scales_closer(fig, len(SF_VALUES))
     _align_colorbars_to_plot(fig, len(SF_VALUES))
-    _position_scale_label_strip(fig, len(SF_VALUES), bottom=0.02, gap=0.008)
+    _position_scale_label_strip(fig, len(SF_VALUES), gap=0.008)
+    _align_scale_unit_with_xlabel(fig, len(SF_VALUES))
     _normalize_figure_fonts(fig)
     fig.savefig(os.path.join(output_dir, f"raw_per_gradient_energy_vs_time_sf_transitions{output_suffix}.png"), dpi=220, bbox_inches="tight")
     plt.close()
@@ -1216,7 +1283,7 @@ def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_b
     """TP transitions: one color-to-black cmap per TP, annotated SF region bands with BW separators."""
     print(f"Rendering TP transition heatmap{output_suffix}...")
     fig = plt.figure(figsize=FIGSIZE_ONE_COL)
-    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.10], wspace=0.0)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1, 0.26], wspace=0.48)
     ax = fig.add_subplot(gs[0])
     _reserve_bottom_space_for_scale_labels(ax)
     ax.set_facecolor(BG_DARK)
@@ -1266,7 +1333,12 @@ def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_b
                 ax.axvline(ts, color="black", linewidth=0.8, alpha=0.5, zorder=2)
 
             # SF label vertical inside upper-left of band (lowered)
-            x_label = ts_c + (t_max - t_min) * 0.01
+            if i < 3:
+                x_label = ts_c + (t_max - t_min) * 0.028
+                if i < 1:
+                    x_label = ts_c + (t_max - t_min) * 0.010
+            else:
+                x_label = ts_c + (t_max - t_min) * 0.012
             y_label = e_max - e_range * 0.01
             txt = ax.text(x_label, y_label, f"SF{sf}", ha="right", va="top",
                          fontsize=IEEE_FONTSIZE, color="black", zorder=6,
@@ -1305,7 +1377,7 @@ def plot_param_transitions_tp(output_dir, config_dir, data_root, filters, time_b
     gs_cbars = gs_right[0].subgridspec(1, len(TP_VALUES), wspace=0.02)
     _add_param_colorbars(fig, gs_cbars, TP_VALUES, log_vmin, vmax)
     ax_leg = fig.add_subplot(gs_right[1])
-    _add_labels_inside_colorbars(fig, labels_tp, color="black")
+    _add_labels_inside_colorbars(fig, x=0.6, labels=labels_tp, color="black")
     _add_legend_labels(ax_leg, [], unit="dBm", unit_y=0.88, unit_va="top")
     _pull_scales_closer(fig, len(TP_VALUES))
     _align_colorbars_to_plot(fig, len(TP_VALUES))
