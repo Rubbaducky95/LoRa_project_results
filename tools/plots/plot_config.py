@@ -3,6 +3,8 @@ Global plotting configuration for IEEE-style figures.
 Import these values in all plotting scripts for consistency.
 """
 
+import os
+
 # Font sizes (IEEE 10pt body text)
 IEEE_FONTSIZE = 10
 
@@ -31,3 +33,22 @@ FIGSIZE_TWO_COL_CBAR_LARGE = (TEXTWIDTH_ONE_COL, FIGURE_HEIGHT)
 
 # DPI for saving figures
 SAVE_DPI = 220
+
+
+def save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight", save_pdf=True, **savefig_kwargs):
+    """Save a figure as PNG and, by default, a sidecar PDF with the same basename."""
+    if not output_png:
+        raise ValueError("output_png must be a non-empty path.")
+
+    png_path = output_png if output_png.lower().endswith(".png") else f"{output_png}.png"
+    pdf_path = os.path.splitext(png_path)[0] + ".pdf"
+
+    out_dir = os.path.dirname(png_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    fig.savefig(png_path, dpi=dpi, bbox_inches=bbox_inches, **savefig_kwargs)
+    if save_pdf:
+        fig.savefig(pdf_path, bbox_inches=bbox_inches, **savefig_kwargs)
+
+    return png_path, pdf_path if save_pdf else None

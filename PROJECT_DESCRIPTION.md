@@ -128,9 +128,14 @@ Pattern: `SF<#>_BW<#>_TP<#>.csv` (e.g. `SF7_BW62500_TP12.csv`)
 | Script                                | Purpose                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `plot_per_gradient_energy_vs_time.py` | PER heatmap (energy vs time), config switch markers, letter labels (B0-B3, S0-S5, T0-T2)         |
+| `plot_per_gradient_energy_vs_distance.py` | PER heatmap (energy vs distance) with BW/SF/TP overlays                                         |
 | `plot_per_vs_multiple_configs.py`     | PER vs distance, multiple configs; defines WORKSPACE, DATA_ROOT, BW_VALUES, SF_VALUES, TP_VALUES |
 | `plot_per_vs_distance_per_config.py`  | PER vs distance per config                                                                       |
-| `plot_raw_per_vs_distance.py`         | Raw PER vs distance                                                                              |
+| `plot_per_vs_rssi.py`                 | PER vs RSSI, including binned/by-BW/circle variants                                              |
+| `plot_raw_avg_rssi_vs_distance_by_tp.py` | Average RSSI vs distance, aggregated by TP                                                    |
+| `plot_energy_minmax_gradient_by_tp.py` | Energy heatmaps across TP, BW, and SF                                                           |
+| `plot_battery_lifetime_throughput.py` | Battery lifetime and throughput vs energy-per-bit                                                |
+| `plot_rssi_vs_multiple.py`            | Combined 3D RSSI figures and RSSI tradeoff plots                                                 |
 | `plot_time_since_boot.py`             | Time since boot / transmission init                                                              |
 
 

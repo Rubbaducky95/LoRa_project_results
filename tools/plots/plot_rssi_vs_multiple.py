@@ -19,7 +19,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-from plot_config import FIGSIZE_IEEE_DOUBLE, FIGSIZE_ONE_COL, FIGSIZE_TWO_COL, IEEE_FONTSIZE, SAVE_DPI
+from plot_config import FIGSIZE_IEEE_DOUBLE, FIGSIZE_ONE_COL, FIGSIZE_TWO_COL, IEEE_FONTSIZE, SAVE_DPI, save_plot_outputs
 
 CFG_RE = re.compile(r"^SF(\d+)_BW(\d+)_TP(\d+)\.csv$")
 DIST_RE = re.compile(r"^distance_([\d.]+)m?$")
@@ -27,6 +27,7 @@ DIST_RE = re.compile(r"^distance_([\d.]+)m?$")
 SF_VALUES = [7, 8, 9, 10, 11, 12]
 TP_VALUES = [2, 12, 22]
 BW_VALUES = [62500, 125000, 250000, 500000]
+STANDARD_DISTANCE_TICKS = np.array([25.0, 50.0, 75.0, 100.0], dtype=float)
 
 
 def setup_plot_style():
@@ -34,6 +35,7 @@ def setup_plot_style():
     plt.rcParams.update(
         {
             "text.usetex": latex_ok,
+            "font.size": IEEE_FONTSIZE,
             "font.family": "serif",
             "font.serif": ["Computer Modern Roman", "CMU Serif", "Times New Roman", "DejaVu Serif"],
             "mathtext.fontset": "cm",
@@ -235,29 +237,26 @@ def _build_distance_cfg_matrix(agg_records, metric_key):
     return np.array(distances, dtype=float), cfgs, mat
 
 
-def _build_distance_sf_matrix(agg_records, bw, metric_key):
-    distances = sorted({row["distance"] for row in agg_records if row["bw"] == bw})
-    dist_to_idx = {distance: i for i, distance in enumerate(distances)}
-    sf_to_idx = {sf: i for i, sf in enumerate(SF_VALUES)}
-    mat = np.full((len(SF_VALUES), len(distances)), np.nan)
-    for row in agg_records:
-        if row["bw"] != bw:
-            continue
-        value = row.get(metric_key)
-        if value is None:
-            continue
-        mat[sf_to_idx[row["sf"]], dist_to_idx[row["distance"]]] = float(value)
-    return np.array(distances, dtype=float), np.array(SF_VALUES, dtype=float), mat
-
-
 def _fmt_distance(d):
     return str(int(d)) if abs(d - round(d)) < 1e-6 else f"{d:.2f}".rstrip("0").rstrip(".")
 
 
+def _preferred_distance_ticks(distances):
+    distances = np.asarray(distances, dtype=float)
+    if distances.size == 0:
+        return distances
+    d_min = float(np.min(distances))
+    d_max = float(np.max(distances))
+    preferred = STANDARD_DISTANCE_TICKS[(STANDARD_DISTANCE_TICKS >= d_min) & (STANDARD_DISTANCE_TICKS <= d_max)]
+    if preferred.size:
+        return preferred
+    if abs(d_max - d_min) < 1e-9:
+        return np.array([d_min], dtype=float)
+    return np.array([d_min, d_max], dtype=float)
+
+
 def _set_distance_ticks(ax, distances):
-    tick_values = distances[::2] if len(distances) > 8 else distances
-    if tick_values[-1] != distances[-1]:
-        tick_values = np.append(tick_values, distances[-1])
+    tick_values = _preferred_distance_ticks(distances)
     ax.set_xticks(tick_values)
     ax.set_xticklabels([_fmt_distance(d) for d in tick_values])
 
@@ -272,9 +271,9 @@ def _set_cfg_ticks(ax, cfgs, step=2):
 
 def _style_3d_axes(ax, elev=27, azim=-61, box_aspect=(1.55, 1.0, 0.82)):
     ax.view_init(elev=elev, azim=azim)
-    ax.tick_params(axis="x", labelsize=IEEE_FONTSIZE - 1, pad=1)
-    ax.tick_params(axis="y", labelsize=IEEE_FONTSIZE - 1, pad=1)
-    ax.tick_params(axis="z", labelsize=IEEE_FONTSIZE - 1, pad=1)
+    ax.tick_params(axis="x", labelsize=IEEE_FONTSIZE, pad=0.5)
+    ax.tick_params(axis="y", labelsize=IEEE_FONTSIZE, pad=0.5)
+    ax.tick_params(axis="z", labelsize=IEEE_FONTSIZE, pad=0.5)
     try:
         ax.set_box_aspect(box_aspect)
     except Exception:
@@ -297,6 +296,18 @@ def _norm_from_matrix(mat):
     return mcolors.Normalize(vmin=vmin, vmax=vmax)
 
 
+def _set_3d_axis_labels(ax, x_label, y_label, z_label, x_pad=1.4, y_pad=2.0, z_pad=1.8):
+    ax.set_xlabel(x_label, fontsize=IEEE_FONTSIZE, labelpad=x_pad)
+    ax.set_ylabel(y_label, fontsize=IEEE_FONTSIZE, labelpad=y_pad)
+    ax.set_zlabel(z_label, fontsize=IEEE_FONTSIZE, labelpad=z_pad)
+    try:
+        ax.zaxis.set_rotate_label(False)
+        ax.zaxis.label.set_rotation(90)
+    except Exception:
+        pass
+    ax.zaxis.label.set_verticalalignment("top")
+
+
 def _plot_rssi_colored_surface(
     ax,
     x_values,
@@ -311,6 +322,11 @@ def _plot_rssi_colored_surface(
     panel_text=None,
     color_cmap="viridis",
     project_floor=False,
+    view_elev=27,
+    view_azim=-61,
+    box_aspect=(1.55, 1.0, 0.82),
+    z_label_coords=None,
+    z_label_rotation=0,
 ):
     if np.all(np.isnan(z_matrix)) or np.all(np.isnan(color_matrix)):
         return False
@@ -358,10 +374,17 @@ def _plot_rssi_colored_surface(
     ax.set_xlim(float(x_values.min()), float(x_values.max()))
     ax.set_ylim(float(y_values.min()), float(y_values.max()))
     ax.set_zlim(z_floor, z_max + 0.06 * z_span)
-    ax.set_xlabel("Distance (m)", fontsize=IEEE_FONTSIZE, labelpad=3)
-    ax.set_ylabel(y_label, fontsize=IEEE_FONTSIZE, labelpad=5)
-    ax.set_zlabel(z_label, fontsize=IEEE_FONTSIZE, labelpad=4)
-    ax.zaxis.label.set_verticalalignment("top")
+    _set_3d_axis_labels(ax, "Distance (m)", y_label, z_label)
+    if z_label_coords is None:
+        _clear_custom_z_label(ax)
+    else:
+        _position_3d_z_label_top(
+            ax,
+            z_label,
+            *z_label_coords,
+            fontsize=IEEE_FONTSIZE,
+            rotation_deg=z_label_rotation,
+        )
     _set_distance_ticks(ax, x_values)
     if y_tick_labels is None:
         ax.set_yticks(y_values[::y_tick_step])
@@ -372,26 +395,30 @@ def _plot_rssi_colored_surface(
             idxs.append(len(y_values) - 1)
         ax.set_yticks(y_values[idxs])
         ax.set_yticklabels([y_tick_labels[i] for i in idxs])
-    _style_3d_axes(ax)
+    _style_3d_axes(ax, elev=view_elev, azim=view_azim, box_aspect=box_aspect)
     if panel_text:
         ax.text2D(
-            0.03,
-            0.95,
+            0.04,
+            0.94,
             panel_text,
             transform=ax.transAxes,
-            fontsize=IEEE_FONTSIZE,
+            fontsize=IEEE_FONTSIZE - 1,
             va="top",
-            bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="0.55", alpha=0.85),
+            bbox=dict(boxstyle="round,pad=0.10", facecolor="white", edgecolor="0.55", alpha=0.82),
         )
     return True
 
 
-def _add_metric_colorbar(fig, axes, norm, label, cmap="viridis"):
+def _add_centered_horizontal_colorbar(fig, norm, label, cmap="viridis", rect=(0.34, 0.88, 0.32, 0.028)):
     sm = ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=axes, shrink=0.80, pad=0.02, aspect=26)
-    cbar.set_label(label, fontsize=IEEE_FONTSIZE)
-    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE - 1)
+    cax = fig.add_axes(rect, zorder=20)
+    cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
+    cbar.set_label(label, fontsize=IEEE_FONTSIZE, labelpad=2)
+    cbar.ax.xaxis.set_label_position("top")
+    cbar.ax.xaxis.set_ticks_position("top")
+    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE, pad=1)
+    return cbar
 
 
 def plot_rssi_distance_sfbw_surface(agg_records, output_png):
@@ -403,7 +430,7 @@ def plot_rssi_distance_sfbw_surface(agg_records, output_png):
     _, _, energy_bit_mat = _build_distance_cfg_matrix(agg_records, "energy_per_bit_uj")
     color_mat = energy_bit_mat if not np.all(np.isnan(energy_bit_mat)) else rssi_mat
     color_norm = _norm_from_matrix(color_mat)
-    color_label = r"Energy per bit ($\mu$J)" if not np.all(np.isnan(energy_bit_mat)) else r"RSSI (avg) (dBm)"
+    color_label = r"Energy/bit ($\mu$J)" if not np.all(np.isnan(energy_bit_mat)) else r"RSSI (dBm)"
     color_cmap = "cividis" if not np.all(np.isnan(energy_bit_mat)) else "viridis"
     fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
     ax = fig.add_subplot(111, projection="3d")
@@ -414,170 +441,84 @@ def plot_rssi_distance_sfbw_surface(agg_records, output_png):
         rssi_mat,
         color_mat,
         color_norm,
-        r"RSSI (avg) (dBm)",
+        r"RSSI (dBm)",
         "SF/BW cfg",
         y_tick_labels=[_sf_bw_label(*cfg) for cfg in cfgs],
-        y_tick_step=2,
+        y_tick_step=3,
         color_cmap=color_cmap,
         project_floor=False,
+        view_elev=28,
+        view_azim=-60,
+        box_aspect=(1.50, 0.92, 0.88),
     )
-    _add_metric_colorbar(fig, ax, color_norm, color_label, cmap=color_cmap)
-    fig.subplots_adjust(left=0.04, right=0.90, top=0.96, bottom=0.06)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    _add_centered_horizontal_colorbar(fig, color_norm, color_label, cmap=color_cmap, rect=(0.35, 0.885, 0.30, 0.028))
+    fig.subplots_adjust(left=0.03, right=0.99, top=0.84, bottom=0.05)
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
-
-
-def plot_rssi_distance_sfbw_bars(agg_records, output_png):
-    """3D bars: x=distance, y=SF/BW config, z=avg RSSI, color=PER."""
-    os.makedirs(os.path.dirname(output_png), exist_ok=True)
-    distances, cfgs, rssi_mat = _build_distance_cfg_matrix(agg_records, "rssi_avg")
-    if np.all(np.isnan(rssi_mat)):
-        return
-    _, _, per_mat = _build_distance_cfg_matrix(agg_records, "per_pct")
-    rssi_min = float(np.nanmin(rssi_mat))
-    rssi_max = float(np.nanmax(rssi_mat))
-    rssi_span = max(rssi_max - rssi_min, 1.0)
-    rssi_floor = rssi_min - 0.22 * rssi_span
-    per_norm = _norm_from_matrix(per_mat) if not np.all(np.isnan(per_mat)) else None
-
-    x_grid, y_grid = np.meshgrid(distances, np.arange(len(cfgs), dtype=float))
-    mask = ~np.isnan(rssi_mat)
-    if not np.any(mask):
-        return
-    dist_step = float(np.min(np.diff(distances))) if len(distances) > 1 else 1.0
-    dx = 0.68 * dist_step
-    dy = 0.58
-
-    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
-    ax = fig.add_subplot(111, projection="3d")
-    if per_norm is not None:
-        bar_colors = plt.cm.inferno(per_norm(np.where(mask, per_mat, per_norm.vmin)[mask]))
-    else:
-        bar_colors = np.tile(np.array([[0.28, 0.52, 0.64, 0.95]]), (mask.sum(), 1))
-    ax.bar3d(
-        x_grid[mask] - dx / 2.0,
-        y_grid[mask] - dy / 2.0,
-        np.full(mask.sum(), rssi_floor),
-        np.full(mask.sum(), dx),
-        np.full(mask.sum(), dy),
-        rssi_mat[mask] - rssi_floor,
-        color=bar_colors,
-        edgecolor=(0.08, 0.08, 0.08, 0.9),
-        linewidth=0.18,
-        shade=True,
-        alpha=0.97,
-    )
-    ax.set_xlim(float(distances.min()), float(distances.max()))
-    ax.set_ylim(0, len(cfgs) - 1)
-    ax.set_zlim(rssi_floor, rssi_max + 0.04 * rssi_span)
-    ax.set_xlabel("Distance (m)", fontsize=IEEE_FONTSIZE, labelpad=3)
-    ax.set_ylabel("SF/BW cfg", fontsize=IEEE_FONTSIZE, labelpad=5)
-    ax.set_zlabel(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE, labelpad=4)
-    ax.zaxis.label.set_verticalalignment("top")
-    _set_distance_ticks(ax, distances)
-    _set_cfg_ticks(ax, cfgs, step=2)
-    _style_3d_axes(ax, elev=25, azim=-63)
-    if per_norm is not None:
-        _add_metric_colorbar(fig, ax, per_norm, "PER (%)", cmap="inferno")
-    fig.subplots_adjust(left=0.04, right=0.90, top=0.96, bottom=0.06)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
-    plt.close()
-    print(f"Saved: {output_png}")
-
-
-def plot_rssi_distance_sf_by_bw_surfaces(agg_records, output_png):
-    """2x2 BW panels: x=distance, y=SF, z=avg RSSI, color=energy per bit."""
-    os.makedirs(os.path.dirname(output_png), exist_ok=True)
-    mats = []
-    for bw in BW_VALUES:
-        distances, sf_vals, rssi_mat = _build_distance_sf_matrix(agg_records, bw, "rssi_avg")
-        _, _, energy_bit_mat = _build_distance_sf_matrix(agg_records, bw, "energy_per_bit_uj")
-        mats.append((bw, distances, sf_vals, rssi_mat, energy_bit_mat))
-    valid_rssi_mats = [rssi_mat for _, _, _, rssi_mat, _ in mats if not np.all(np.isnan(rssi_mat))]
-    valid_energy_mats = [energy_bit_mat for _, _, _, _, energy_bit_mat in mats if not np.all(np.isnan(energy_bit_mat))]
-    if not valid_rssi_mats:
-        return
-    color_cmap = "cividis" if valid_energy_mats else "viridis"
-    color_label = r"Energy per bit ($\mu$J)" if valid_energy_mats else r"RSSI (avg) (dBm)"
-    color_norm = _norm_from_matrix(
-        np.vstack(valid_energy_mats) if valid_energy_mats else np.vstack(valid_rssi_mats)
-    )
-
-    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
-    axes = []
-    for idx, (bw, distances, sf_vals, rssi_mat, energy_bit_mat) in enumerate(mats):
-        ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
-        axes.append(ax)
-        if np.all(np.isnan(rssi_mat)):
-            ax.set_axis_off()
-            continue
-        color_mat = energy_bit_mat if not np.all(np.isnan(energy_bit_mat)) else rssi_mat
-        _plot_rssi_colored_surface(
-            ax,
-            distances,
-            sf_vals,
-            rssi_mat,
-            color_mat,
-            color_norm,
-            r"RSSI (avg) (dBm)",
-            "SF",
-            y_tick_labels=[str(sf) for sf in SF_VALUES],
-            y_tick_step=1,
-            panel_text=f"BW {_fmt_bw(bw / 1000.0)} kHz",
-            color_cmap=color_cmap,
-            project_floor=False,
-        )
-    _add_metric_colorbar(fig, axes, color_norm, color_label, cmap=color_cmap)
-    fig.subplots_adjust(left=0.02, right=0.92, top=0.96, bottom=0.05, wspace=0.02, hspace=0.08)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
-    plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 def plot_rssi_distance_signal_tradeoff_surfaces(agg_records, output_png):
-    """Two-panel tradeoff view: energy/PER as z, RSSI as the color cue."""
+    """Single-panel tradeoff view: prefer PER as z, with RSSI as the color cue."""
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
     distances, cfgs, rssi_mat = _build_distance_cfg_matrix(agg_records, "rssi_avg")
     if np.all(np.isnan(rssi_mat)):
         return
-    metric_specs = [
-        ("energy_per_bit_uj", r"Energy per bit ($\mu$J)"),
+    metric_spec = None
+    metric_mat = None
+    for candidate_spec in [
         ("per_pct", "PER (%)"),
-    ]
-    panel_mats = []
-    for metric_key, metric_label in metric_specs:
-        _, _, metric_mat = _build_distance_cfg_matrix(agg_records, metric_key)
-        if not np.all(np.isnan(metric_mat)):
-            panel_mats.append((metric_label, metric_mat))
-    if not panel_mats:
+        ("energy_per_bit_uj", r"Energy/bit ($\mu$J)"),
+    ]:
+        _, _, candidate_mat = _build_distance_cfg_matrix(agg_records, candidate_spec[0])
+        if not np.all(np.isnan(candidate_mat)):
+            metric_spec = candidate_spec
+            metric_mat = candidate_mat
+            break
+    if metric_spec is None or metric_mat is None:
         return
 
     rssi_norm = _norm_from_matrix(rssi_mat)
     fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
-    axes = []
-    for idx, (metric_label, metric_mat) in enumerate(panel_mats):
-        ax = fig.add_subplot(1, len(panel_mats), idx + 1, projection="3d")
-        axes.append(ax)
-        _plot_rssi_colored_surface(
-            ax,
-            distances,
-            np.arange(len(cfgs), dtype=float),
-            metric_mat,
-            rssi_mat,
-            rssi_norm,
-            metric_label,
-            "SF/BW cfg",
-            y_tick_labels=[_sf_bw_label(*cfg) for cfg in cfgs],
-            y_tick_step=3,
-            color_cmap="viridis",
-            project_floor=False,
-        )
-    _add_metric_colorbar(fig, axes, rssi_norm, r"RSSI (avg) (dBm)", cmap="viridis")
-    fig.subplots_adjust(left=0.03, right=0.92, top=0.96, bottom=0.06, wspace=0.08)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    ax = fig.add_subplot(111, projection="3d")
+    _plot_rssi_colored_surface(
+        ax,
+        distances,
+        np.arange(len(cfgs), dtype=float),
+        metric_mat,
+        rssi_mat,
+        rssi_norm,
+        metric_spec[1],
+        "SF/BW cfg",
+        y_tick_labels=[_sf_bw_label(*cfg) for cfg in cfgs],
+        y_tick_step=3,
+        color_cmap="viridis",
+        project_floor=False,
+        view_elev=28,
+        view_azim=-60,
+        box_aspect=(1.35, 0.92, 0.92),
+        z_label_coords=(1.0, 0.84),
+    )
+    _add_rotated_rssi_scale(
+        fig,
+        ax,
+        plt.get_cmap("viridis"),
+        float(rssi_norm.vmin),
+        float(rssi_norm.vmax),
+        label=r"RSSI (dBm)",
+        fontsize=IEEE_FONTSIZE,
+        loc=(0.02, 0.72),
+        tick_side="outside",
+        label_side="tick_side",
+        scale_graph_side="left",
+        label_graph_side="right",
+    )
+    fig.subplots_adjust(left=0.03, right=0.99, top=0.92, bottom=0.05)
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 def plot_rssi_vs_x(records, x_key, x_label, output_png, x_unit=""):
@@ -621,9 +562,10 @@ def plot_rssi_vs_x(records, x_key, x_label, output_png, x_unit=""):
     ax.legend(loc="best", fontsize=IEEE_FONTSIZE, ncol=2)
     ax.set_xlim(left=min(p[2] for p in points) * 0.98 if min(p[2] for p in points) > 0 else None)
     fig.subplots_adjust(left=0.14, right=0.95, top=0.95, bottom=0.12)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 def _fmt_bw(b):
@@ -653,12 +595,159 @@ def _nice_rssi_ticks(vmin, vmax):
     return [lo, 0.5 * (lo + hi), hi]
 
 
-def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=(0.02, 0.72), size=(0.34, 0.23), fontsize=None, text_angle_deg=None):
-    """Add a compact rotated gradient scale in the upper-left of a 3D axes."""
+def _add_rotated_rssi_scale(
+    fig,
+    ax,
+    cmap,
+    vmin,
+    vmax,
+    label,
+    angle_deg=None,
+    loc=None,
+    size=None,
+    fontsize=None,
+    text_angle_deg=None,
+    tick_side="inside",
+    label_side="tick_side",
+    scale_graph_side=None,
+    label_graph_side=None,
+    graph_side_pad=(0.02, 0.03),
+    label_graph_pad=None,
+    label_graph_rotation=None,
+    tick_len=0.03,
+    tick_gap=None,
+    label_gap=None,
+):
+    """Add a compact rotated gradient scale with side-aware ticks and label.
+
+    `tick_side` and `label_side` may be:
+    - `inside`: side facing the parent axes center
+    - `outside`: side facing away from the parent axes center
+    - `positive`: local +normal side of the unrotated bar
+    - `negative`: local -normal side of the unrotated bar
+    - `tick_side`: for `label_side` only, use the same side as ticks
+    - `opposite`: opposite of `tick_side`
+
+    `scale_graph_side` and `label_graph_side` may be:
+    - `left`: upper-left of the parent 3D axes
+    - `right`: upper-right of the parent 3D axes
+
+    If `scale_graph_side` is set, `loc` becomes an `(x, y)` offset from that
+    anchored corner instead of an absolute axes-relative position.
+    """
     if fontsize is None:
         fontsize = IEEE_FONTSIZE
+    if size is None:
+        if scale_graph_side in ("left", "right"):
+            size = (0.5, 0.25)
+        else:
+            size = (0.34, 0.23)
+    if angle_deg is None:
+        if scale_graph_side == "left":
+            angle_deg = 235.0
+        elif scale_graph_side == "right":
+            angle_deg = -27.5
+        else:
+            angle_deg = 45.0
     if text_angle_deg is None:
         text_angle_deg = angle_deg
+    if label_graph_pad is None:
+        if (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "left"
+            and label_graph_side == "left"
+        ):
+            label_graph_pad = (-0.05, 0.125)
+        elif (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "left"
+            and label_graph_side == "right"
+        ):
+            label_graph_pad = (0.2, 0.1)
+        elif (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "right"
+            and label_graph_side == "left"
+        ):
+            label_graph_pad = (0.05, 0.225)
+        elif (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "right"
+            and label_graph_side == "right"
+        ):
+            label_graph_pad = (0.05, 0.0)
+        else:
+            label_graph_pad = (0.03, 0.03)
+    if tick_gap is None:
+        if (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "right"
+            and label_graph_side in ("left", "right")
+        ):
+            tick_gap = 0.05
+        elif scale_graph_side == "left":
+            tick_gap = 0.2
+        else:
+            tick_gap = 0.2
+    if label_gap is None:
+        if (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "right"
+            and label_graph_side == "left"
+        ):
+            label_gap = 0.1
+        elif (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "left"
+            and label_graph_side == "right"
+        ):
+            label_gap = 0.1
+        else:
+            label_gap = 0.25
+    if label_graph_rotation is None:
+        if (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "left"
+            and label_graph_side == "left"
+        ):
+            label_graph_rotation = 35.0
+        elif (
+            tick_side == "outside"
+            and label_side == "tick_side"
+            and scale_graph_side == "left"
+            and label_graph_side == "right"
+        ):
+            label_graph_rotation = -15.0
+        elif label_graph_side == "left":
+            label_graph_rotation = 35.0
+        elif label_graph_side == "right":
+            label_graph_rotation = -15.0
+        else:
+            label_graph_rotation = 0.0
+    if loc is None:
+        if scale_graph_side == "left":
+            loc = (-0.05, 0.04)
+        elif scale_graph_side == "right":
+            loc = (-0.1, 0.1)
+        else:
+            loc = (0.02, 0.72)
+    if scale_graph_side is not None:
+        pad_x, pad_y = graph_side_pad
+        if scale_graph_side == "left":
+            base_loc = (pad_x, 1.0 - size[1] - pad_y)
+        elif scale_graph_side == "right":
+            base_loc = (1.0 - size[0] - pad_x, 1.0 - size[1] - pad_y)
+        else:
+            raise ValueError(f"Unsupported scale graph side: {scale_graph_side}")
+        loc = (base_loc[0] + loc[0], base_loc[1] + loc[1])
     ax_pos = ax.get_position()
     scale_ax = fig.add_axes(
         [
@@ -675,12 +764,46 @@ def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=
 
     grad_x0, grad_y0 = 0.08, 0.18
     grad_w, grad_h = 1.2, 0.12
-    tick_len = 0.07
-    tick_gap = 0.045
-    label_gap = 0.16
+    label_gap_opposite = 0.05
     cx = grad_x0 + 0.4 * grad_w
     cy = grad_y0 + 0.8 * grad_h
     rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, angle_deg) + scale_ax.transAxes
+
+    def _resolve_inside_sign():
+        ax_pos = ax.get_position()
+        ax_center_disp = fig.transFigure.transform(
+            (ax_pos.x0 + 0.5 * ax_pos.width, ax_pos.y0 + 0.5 * ax_pos.height)
+        )
+        probe_offset = max(grad_h + tick_len + tick_gap, 0.22)
+        bar_center_x = grad_x0 + 0.5 * grad_w
+        pos_probe = np.asarray(rot.transform((bar_center_x, grad_y0 + grad_h + probe_offset)))
+        neg_probe = np.asarray(rot.transform((bar_center_x, grad_y0 - probe_offset)))
+        pos_dist = np.linalg.norm(pos_probe - ax_center_disp)
+        neg_dist = np.linalg.norm(neg_probe - ax_center_disp)
+        return 1 if pos_dist <= neg_dist else -1
+
+    def _resolve_side_sign(side_name, inside_sign, ref_sign=None):
+        if side_name == "inside":
+            return inside_sign
+        if side_name == "outside":
+            return -inside_sign
+        if side_name in ("positive", "+"):
+            return 1
+        if side_name in ("negative", "-"):
+            return -1
+        if side_name == "tick_side":
+            if ref_sign is None:
+                raise ValueError("`tick_side` reference requested before tick side is resolved")
+            return ref_sign
+        if side_name == "opposite":
+            if ref_sign is None:
+                raise ValueError("`opposite` requested before tick side is resolved")
+            return -ref_sign
+        raise ValueError(f"Unsupported rotated scale side: {side_name}")
+
+    inside_sign = _resolve_inside_sign()
+    tick_sign = _resolve_side_sign(tick_side, inside_sign)
+    label_sign = _resolve_side_sign(label_side, inside_sign, ref_sign=tick_sign)
 
     gradient = np.linspace(vmin, vmax, 256).reshape(1, -1)
     scale_ax.imshow(
@@ -713,9 +836,19 @@ def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=
     for tick in _nice_rssi_ticks(vmin, vmax):
         frac = 0.5 if vmax == vmin else (tick - vmin) / (vmax - vmin)
         x_tick = grad_x0 + frac * grad_w
+        if tick_sign > 0:
+            tick_y0 = grad_y0 + grad_h
+            tick_y1 = grad_y0 + grad_h + tick_len
+            tick_text_y = tick_y1 + tick_gap
+            tick_text_va = "bottom"
+        else:
+            tick_y0 = grad_y0
+            tick_y1 = grad_y0 - tick_len
+            tick_text_y = tick_y1 - tick_gap
+            tick_text_va = "top"
         scale_ax.plot(
             [x_tick, x_tick],
-            [grad_y0 + grad_h, grad_y0 + grad_h + tick_len],
+            [tick_y0, tick_y1],
             color="black",
             linewidth=0.8,
             transform=rot,
@@ -725,86 +858,285 @@ def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=
         tick_text = f"{tick:.0f}" if abs(tick - round(tick)) < 1e-6 else f"{tick:.1f}"
         scale_ax.text(
             x_tick,
-            grad_y0 + grad_h + tick_len + tick_gap,
+            tick_text_y,
             tick_text,
             transform=rot,
-            rotation=text_angle_deg,
-            rotation_mode="anchor",
             ha="center",
-            va="bottom",
+            va=tick_text_va,
             fontsize=fontsize,
             clip_on=False,
             zorder=5,
         )
 
-    scale_ax.text(
-        grad_x0 + 0.5 * grad_w,
-        grad_y0 + grad_h + tick_len + label_gap,
-        label,
-        transform=rot,
-        rotation=text_angle_deg,
-        rotation_mode="anchor",
-        ha="center",
-        va="top",
-        fontsize=fontsize,
-        clip_on=False,
-        zorder=5,
-    )
+    existing_label = getattr(ax, "_rotated_scale_label_text", None)
+    if existing_label is not None:
+        try:
+            existing_label.remove()
+        except Exception:
+            pass
+        ax._rotated_scale_label_text = None
+
+    if label_graph_side is not None:
+        pad_x, pad_y = label_graph_pad
+        if label_graph_side == "left":
+            label_x, label_ha = pad_x, "left"
+        elif label_graph_side == "right":
+            label_x, label_ha = 1.0 - pad_x, "right"
+        else:
+            raise ValueError(f"Unsupported label graph side: {label_graph_side}")
+        ax._rotated_scale_label_text = ax.text2D(
+            label_x,
+            1.0 - pad_y,
+            label,
+            transform=ax.transAxes,
+            rotation=label_graph_rotation,
+            rotation_mode="anchor",
+            ha=label_ha,
+            va="top",
+            fontsize=fontsize,
+        )
+    else:
+        label_x = grad_x0 + 0.5 * grad_w
+        if label_sign > 0:
+            label_offset = tick_len + label_gap if label_sign == tick_sign else label_gap_opposite
+            label_y = grad_y0 + grad_h + label_offset
+            label_va = "top"
+        else:
+            label_offset = tick_len + label_gap if label_sign == tick_sign else label_gap_opposite
+            label_y = grad_y0 - label_offset
+            label_va = "bottom"
+        scale_ax.text(
+            label_x,
+            label_y,
+            label,
+            transform=rot,
+            rotation=text_angle_deg,
+            rotation_mode="anchor",
+            ha="center",
+            va=label_va,
+            fontsize=fontsize,
+            clip_on=False,
+            zorder=5,
+        )
     return scale_ax
+
+
+def _aggregate_3d_points(records, x_axis, y_axis, z_axis, metric_key="rssi_avg"):
+    """Aggregate one metric over the unused dimension for a chosen 3D axis triplet."""
+    grouped = defaultdict(list)
+    for distance, sf, bw, tp, metrics in records:
+        point_key = (
+            _get_axis_val(x_axis, distance, sf, bw, tp),
+            _get_axis_val(y_axis, distance, sf, bw, tp),
+            _get_axis_val(z_axis, distance, sf, bw, tp),
+        )
+        metric_value = metrics.get(metric_key)
+        if None in point_key or metric_value is None:
+            continue
+        grouped[point_key].append(float(metric_value))
+
+    points = []
+    for (x_val, y_val, z_val), values in grouped.items():
+        points.append(
+            {
+                x_axis: x_val,
+                y_axis: y_val,
+                z_axis: z_val,
+                metric_key: float(np.mean(values)),
+            }
+        )
+    return points
+
+
+def _clear_custom_z_label(ax):
+    existing = getattr(ax, "_custom_zlabel_text", None)
+    if existing is not None:
+        text_items = existing if isinstance(existing, (list, tuple)) else [existing]
+        for item in text_items:
+            try:
+                item.remove()
+            except Exception:
+                pass
+        ax._custom_zlabel_text = None
+
+
+def _format_custom_z_label(label, y_value):
+    """Wrap longer overlay z-labels and nudge them upward slightly."""
+    if "\n" in label:
+        return label.splitlines(), y_value
+    compact_label = label.replace(" ", "")
+    if len(compact_label) <= 3:
+        return [label], y_value
+    if " (" in label:
+        return label.replace(" (", "\n(").splitlines(), y_value + 0.05
+    if " " in label:
+        first, rest = label.split(" ", 1)
+        return [first, rest], y_value + 0.05
+    return [label], y_value
+
+
+def _position_3d_z_label_top(ax, label, x=1.02, y=1.01, fontsize=IEEE_FONTSIZE, rotation_deg=0):
+    """Draw a controllable z-label near the top of the z-axis using axes coordinates."""
+    _clear_custom_z_label(ax)
+    label_lines, y_pos = _format_custom_z_label(label, y)
+
+    ax.set_zlabel("")
+    line_step = 0.055
+    text_items = []
+    for idx, line in enumerate(label_lines):
+        text_items.append(
+            ax.text2D(
+                x,
+                y_pos - idx * line_step,
+                line,
+                transform=ax.transAxes,
+                rotation=rotation_deg,
+                rotation_mode="anchor",
+                ha="left",
+                va="top",
+                fontsize=fontsize,
+            )
+        )
+    ax._custom_zlabel_text = text_items
+
+
+def _resolve_axis_values(value):
+    """Normalize a scalar or per-axis mapping/tuple to x/y/z values."""
+    axes = ("x", "y", "z")
+    if isinstance(value, dict):
+        return {axis: float(value.get(axis, 0.0)) for axis in axes}
+    if isinstance(value, (tuple, list)) and len(value) == 3:
+        return {axis: float(axis_value) for axis, axis_value in zip(axes, value)}
+    scalar = float(value)
+    return {axis: scalar for axis in axes}
+
+
+def _plot_3d_scatter_panel(
+    ax,
+    points,
+    x_axis,
+    y_axis,
+    z_axis,
+    labels,
+    rssi_min,
+    rssi_max,
+    bw_khz,
+    dist_ticks,
+    invert_x=False,
+    invert_y=False,
+    labelpad=0.0,
+    tickpad=0.0,
+    z_label_coords=None,
+    z_label_rotation=0,
+):
+    """Render one reusable 3D scatter panel inside a combined figure."""
+    if not points:
+        ax.set_axis_off()
+        return None
+    label_pads = _resolve_axis_values(labelpad)
+    tick_pads = _resolve_axis_values(tickpad)
+
+    x_vals = np.array([point[x_axis] for point in points], dtype=float)
+    y_vals = np.array([point[y_axis] for point in points], dtype=float)
+    z_vals = np.array([point[z_axis] for point in points], dtype=float)
+    rssi_vals = np.array([point["rssi_avg"] for point in points], dtype=float)
+
+    if x_axis == "bw" or y_axis == "bw" or z_axis == "bw":
+        for axis_name, axis_key in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
+            if axis_key != "bw":
+                continue
+            if axis_name == "x":
+                x_vals = np.log10(np.maximum(x_vals, 1))
+            elif axis_name == "y":
+                y_vals = np.log10(np.maximum(y_vals, 1))
+            else:
+                z_vals = np.log10(np.maximum(z_vals, 1))
+            break
+
+    sc = ax.scatter(
+        x_vals,
+        y_vals,
+        z_vals,
+        c=rssi_vals,
+        cmap="viridis",
+        s=35,
+        edgecolors="k",
+        linewidths=0.3,
+        vmin=rssi_min,
+        vmax=rssi_max,
+    )
+    ax.set_xlabel(labels[x_axis], fontsize=IEEE_FONTSIZE, labelpad=label_pads["x"])
+    ax.set_ylabel(labels[y_axis], fontsize=IEEE_FONTSIZE, labelpad=label_pads["y"])
+    if z_label_coords is None:
+        _clear_custom_z_label(ax)
+        ax.set_zlabel(labels[z_axis], fontsize=IEEE_FONTSIZE, labelpad=label_pads["z"])
+        ax.zaxis.label.set_verticalalignment("top")
+    else:
+        _position_3d_z_label_top(
+            ax,
+            labels[z_axis],
+            *z_label_coords,
+            fontsize=IEEE_FONTSIZE,
+            rotation_deg=z_label_rotation,
+        )
+    ax.tick_params(axis="x", labelsize=IEEE_FONTSIZE, pad=tick_pads["x"])
+    ax.tick_params(axis="y", labelsize=IEEE_FONTSIZE, pad=tick_pads["y"])
+    ax.tick_params(axis="z", labelsize=IEEE_FONTSIZE, pad=tick_pads["z"])
+
+    for axis_name, axis_key in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
+        set_ticks = getattr(ax, f"set_{axis_name}ticks")
+        set_ticklabels = getattr(ax, f"set_{axis_name}ticklabels")
+        if axis_key == "sf":
+            set_ticks(SF_VALUES)
+            set_ticklabels([str(sf) for sf in SF_VALUES])
+        elif axis_key == "bw":
+            bw_ticks = np.log10(np.array(bw_khz))
+            set_ticks(bw_ticks)
+            set_ticklabels([_fmt_bw(bw) for bw in bw_khz])
+        elif axis_key == "tp":
+            set_ticks(TP_VALUES)
+            set_ticklabels([str(tp) for tp in TP_VALUES])
+        elif axis_key == "distance":
+            set_ticks(dist_ticks)
+            set_ticklabels([_fmt_distance(distance) for distance in dist_ticks])
+
+    if invert_x:
+        ax.invert_xaxis()
+    if invert_y:
+        ax.invert_yaxis()
+    return sc
 
 
 def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, invert_y=False):
     """3D scatter: x_axis, y_axis, z_axis as axes, color=RSSI (avg). Aggregates over the 4th dimension."""
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
-    agg = defaultdict(list)
-    for distance, sf, bw, tp, m in records:
-        key = (_get_axis_val(x_axis, distance, sf, bw, tp),
-               _get_axis_val(y_axis, distance, sf, bw, tp),
-               _get_axis_val(z_axis, distance, sf, bw, tp))
-        if None in key:
-            continue
-        agg[key].append(m["rssi_avg"])
-    points = []
-    for (xv, yv, zv), rssi_list in agg.items():
-        points.append({x_axis: xv, y_axis: yv, z_axis: zv, "rssi": sum(rssi_list) / len(rssi_list)})
+    points = _aggregate_3d_points(records, x_axis, y_axis, z_axis, metric_key="rssi_avg")
     if not points:
         return
-    x_vals = np.array([p[x_axis] for p in points])
-    y_vals = np.array([p[y_axis] for p in points])
-    z_vals = np.array([p[z_axis] for p in points])
-    rssi_vals = np.array([p["rssi"] for p in points])
+    rssi_vals = np.array([point["rssi_avg"] for point in points], dtype=float)
     fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
     ax = fig.add_subplot(111, projection="3d")
-    sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=50, edgecolors="k", linewidths=0.3)
     labels = {"sf": "SF", "bw": "BW (kHz)", "tp": "TP (dBm)", "distance": "Distance (m)"}
-    ax.set_xlabel(labels.get(x_axis, x_axis), fontsize=IEEE_FONTSIZE, labelpad=2)
-    ax.set_ylabel(labels.get(y_axis, y_axis), fontsize=IEEE_FONTSIZE, labelpad=2)
-    ax.set_zlabel(labels.get(z_axis, z_axis), fontsize=IEEE_FONTSIZE, labelpad=2)
-    ax.zaxis.label.set_verticalalignment('top')
-    ax.tick_params(axis='x', pad=1)
-    ax.tick_params(axis='y', pad=1)
-    ax.tick_params(axis='z', pad=1)
     bw_khz = sorted(set(bw / 1000.0 for bw in BW_VALUES))
     distances = sorted(set(d for d, _, _, _, _ in records))
-    for axis, key in [("x", x_axis), ("y", y_axis), ("z", z_axis)]:
-        set_ticks = getattr(ax, f"set_{axis}ticks")
-        set_ticklabels = getattr(ax, f"set_{axis}ticklabels")
-        if key == "sf":
-            set_ticks(SF_VALUES)
-            set_ticklabels([str(s) for s in SF_VALUES])
-        elif key == "bw":
-            set_ticks(bw_khz)
-            set_ticklabels([_fmt_bw(b) for b in bw_khz])
-        elif key == "tp":
-            set_ticks(TP_VALUES)
-            set_ticklabels([str(t) for t in TP_VALUES])
-        elif key == "distance":
-            set_ticks(distances)
-            set_ticklabels([str(int(d)) if d == int(d) else f"{d:.1f}" for d in distances])
-    if invert_x:
-        ax.invert_xaxis()
-    if invert_y:
-        ax.invert_yaxis()
+    dist_ticks = _preferred_distance_ticks(distances)
+    sc = _plot_3d_scatter_panel(
+        ax,
+        points,
+        x_axis,
+        y_axis,
+        z_axis,
+        labels,
+        float(np.min(rssi_vals)),
+        float(np.max(rssi_vals)),
+        bw_khz,
+        dist_ticks,
+        invert_x=invert_x,
+        invert_y=invert_y,
+        labelpad=1.2,
+        tickpad=0.6,
+        z_label_coords=None,
+    )
     fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.05)
     _add_rotated_rssi_scale(
         fig,
@@ -813,14 +1145,11 @@ def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, in
         float(sc.norm.vmin),
         float(sc.norm.vmax),
         r"RSSI (avg) (dBm)",
-        angle_deg=225,
-        text_angle_deg=45,
-        loc=(0.00, 0.71),
-        size=(0.38, 0.28),
     )
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 DISTANCE_TICK_INTERVAL = 25.0
@@ -884,9 +1213,10 @@ def plot_rssi_config_vs_distance_heatmap(records, output_png):
     cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
     ax.tick_params(axis="both", labelsize=IEEE_FONTSIZE)
     fig.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.18)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 def plot_rssi_config_distance_energy_3d(records, output_png):
@@ -930,92 +1260,58 @@ def plot_rssi_config_distance_energy_3d(records, output_png):
     cbar.set_label(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE)
     cbar.ax.tick_params(labelsize=IEEE_FONTSIZE)
     fig.subplots_adjust(left=0.02, right=0.92, top=0.95, bottom=0.05)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 def plot_rssi_3d_combined(records, output_png):
     """Three 3D subplots in one 2-column figure: A) BW-distance-SF, B) TP-distance-SF, C) TP-distance-BW."""
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
     distances = sorted(set(d for d, _, _, _, _ in records))
-    d_min, d_max = min(distances), max(distances)
-    dist_ticks = [DISTANCE_TICK_INTERVAL * i for i in range(1, int(d_max / DISTANCE_TICK_INTERVAL) + 1) if d_min <= DISTANCE_TICK_INTERVAL * i <= d_max]
+    dist_ticks = _preferred_distance_ticks(distances)
     bw_khz = sorted(set(bw / 1000.0 for bw in BW_VALUES))
     labels = {"sf": "SF", "bw": "BW (kHz)", "tp": "TP (dBm)", "distance": "Distance (m)"}
-
-    def agg_3d(x_axis, y_axis, z_axis):
-        a = defaultdict(list)
-        for distance, sf, bw, tp, m in records:
-            key = (_get_axis_val(x_axis, distance, sf, bw, tp),
-                   _get_axis_val(y_axis, distance, sf, bw, tp),
-                   _get_axis_val(z_axis, distance, sf, bw, tp))
-            if None in key:
-                continue
-            a[key].append(m["rssi_avg"])
-        return [{x_axis: xv, y_axis: yv, z_axis: zv, "rssi": sum(v) / len(v)} for (xv, yv, zv), v in a.items()]
 
     configs = [
         ("bw", "distance", "sf", True, False),
         ("tp", "distance", "sf", True, False),
         ("tp", "distance", "bw", True, False),
     ]
+    panel_points = [
+        (x_axis, y_axis, z_axis, inv_x, inv_y, _aggregate_3d_points(records, x_axis, y_axis, z_axis, metric_key="rssi_avg"))
+        for x_axis, y_axis, z_axis, inv_x, inv_y in configs
+    ]
     fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
     rssi_all = []
-    for x_axis, y_axis, z_axis, _, _ in configs:
-        pts = agg_3d(x_axis, y_axis, z_axis)
-        rssi_all.extend(p["rssi"] for p in pts)
+    for _, _, _, _, _, points in panel_points:
+        rssi_all.extend(point["rssi_avg"] for point in points)
     rssi_min, rssi_max = min(rssi_all), max(rssi_all) if rssi_all else (-100, -40)
 
     scatter_handles = []
-    for idx, (x_axis, y_axis, z_axis, inv_x, inv_y) in enumerate(configs):
-        pts = agg_3d(x_axis, y_axis, z_axis)
-        if not pts:
-            continue
-        x_vals = np.array([p[x_axis] for p in pts])
-        y_vals = np.array([p[y_axis] for p in pts])
-        z_vals = np.array([p[z_axis] for p in pts])
-        if x_axis == "bw" or y_axis == "bw" or z_axis == "bw":
-            for axis, key in [("x", x_axis), ("y", y_axis), ("z", z_axis)]:
-                if key == "bw":
-                    if axis == "x":
-                        x_vals = np.log10(np.maximum(x_vals, 1))
-                    elif axis == "y":
-                        y_vals = np.log10(np.maximum(y_vals, 1))
-                    else:
-                        z_vals = np.log10(np.maximum(z_vals, 1))
-                    break
-        rssi_vals = np.array([p["rssi"] for p in pts])
+    for idx, (x_axis, y_axis, z_axis, inv_x, inv_y, points) in enumerate(panel_points):
         ax = fig.add_subplot(1, 3, idx + 1, projection="3d")
-        sc = ax.scatter(x_vals, y_vals, z_vals, c=rssi_vals, cmap="viridis", s=35, edgecolors="k", linewidths=0.3, vmin=rssi_min, vmax=rssi_max)
-        scatter_handles.append((sc, ax, x_axis, y_axis, z_axis))
-        ax.set_xlabel(labels[x_axis], fontsize=IEEE_FONTSIZE, labelpad=2)
-        ax.set_ylabel(labels[y_axis], fontsize=IEEE_FONTSIZE, labelpad=2)
-        ax.set_zlabel(labels[z_axis], fontsize=IEEE_FONTSIZE, labelpad=2)
-        ax.zaxis.label.set_verticalalignment('top')
-        ax.tick_params(axis='x', pad=1)
-        ax.tick_params(axis='y', pad=1)
-        ax.tick_params(axis='z', pad=1)
-        for axis, key in [("x", x_axis), ("y", y_axis), ("z", z_axis)]:
-            set_ticks = getattr(ax, f"set_{axis}ticks")
-            set_ticklabels = getattr(ax, f"set_{axis}ticklabels")
-            if key == "sf":
-                set_ticks(SF_VALUES)
-                set_ticklabels([str(s) for s in SF_VALUES])
-            elif key == "bw":
-                log_bw = np.log10(np.array(bw_khz))
-                set_ticks(log_bw)
-                set_ticklabels([_fmt_bw(b) for b in bw_khz])
-            elif key == "tp":
-                set_ticks(TP_VALUES)
-                set_ticklabels([str(t) for t in TP_VALUES])
-            elif key == "distance":
-                set_ticks(dist_ticks)
-                set_ticklabels([f"{int(d)}" for d in dist_ticks])
-        if inv_x:
-            ax.invert_xaxis()
-        if inv_y:
-            ax.invert_yaxis()
+        z_label_coords = (0.98, 0.84) if idx == len(panel_points) - 1 else (1.0, 0.84)
+        sc = _plot_3d_scatter_panel(
+            ax,
+            points,
+            x_axis,
+            y_axis,
+            z_axis,
+            labels,
+            rssi_min,
+            rssi_max,
+            bw_khz,
+            dist_ticks,
+            invert_x=inv_x,
+            invert_y=inv_y,
+            labelpad={"x": -7.0, "y": -6.0, "z": 0.0},
+            tickpad={"x": -4.0, "y": -3.0, "z": -1.0},
+            z_label_coords=z_label_coords,
+        )
+        if sc is not None:
+            scatter_handles.append((sc, ax, x_axis, y_axis, z_axis))
 
     fig.subplots_adjust(left=0.02, right=0.95, top=0.92, bottom=0.05, wspace=0.2)
     for sc, ax, _, _, _ in scatter_handles:
@@ -1025,16 +1321,17 @@ def plot_rssi_3d_combined(records, output_png):
             sc.cmap,
             float(sc.norm.vmin),
             float(sc.norm.vmax),
-            r"RSSI (avg) (dBm)",
-            angle_deg=225,
-            text_angle_deg=40,
-            loc=(0.00, 0.75),
-            size=(0.42, 0.28),
+            label=r"RSSI (dBm)",
             fontsize=IEEE_FONTSIZE,
+            tick_side="outside",
+            label_side="tick_side",
+            scale_graph_side="right",
+            label_graph_side="left",
         )
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
-    print(f"Saved: {output_png}")
+    print(f"Saved: {png_path}")
+    print(f"Saved: {pdf_path}")
 
 
 def main():
@@ -1062,11 +1359,6 @@ def main():
 
     plot_rssi_3d_combined(records, os.path.join(args.output_dir, "raw_rssi_3d_combined.png"))
     plot_rssi_distance_sfbw_surface(agg_records, os.path.join(args.output_dir, "raw_rssi_distance_sfbw_surface.png"))
-    plot_rssi_distance_sfbw_bars(agg_records, os.path.join(args.output_dir, "raw_rssi_distance_sfbw_bars.png"))
-    plot_rssi_distance_sf_by_bw_surfaces(
-        agg_records,
-        os.path.join(args.output_dir, "raw_rssi_distance_sf_by_bw_surfaces.png"),
-    )
     plot_rssi_distance_signal_tradeoff_surfaces(
         agg_records,
         os.path.join(args.output_dir, "raw_rssi_distance_signal_tradeoff.png"),
