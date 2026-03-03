@@ -9,8 +9,10 @@ import re
 import shutil
 from collections import defaultdict
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.cm import ScalarMappable
 from matplotlib import transforms as mtransforms
 from matplotlib.patches import Rectangle
 from mpl_toolkits.mplot3d import Axes3D
@@ -65,7 +67,7 @@ def parse_float(x):
 
 def read_file_metrics(path):
     """
-    Return dict with: rssi_avg, distance, sf, bw, tp, energy_mj, throughput_bps, energy_per_bit_uj, snr_db.
+    Return dict with trusted per-file metrics derived from packet rows only.
     Returns None if insufficient data.
     """
     rows = list(csv.reader(open(path, "r", encoding="utf-8-sig")))
@@ -85,16 +87,24 @@ def read_file_metrics(path):
         energy_scale = 1.0
     i_time = header.index("time_since_transmission_init_ms") if "time_since_transmission_init_ms" in header else None
     i_payload = header.index("payload_size_bytes") if "payload_size_bytes" in header else None
-    i_snr = header.index("snr_db") if "snr_db" in header else None
+    i_payload_raw = header.index("payload") if "payload" in header else None
 
     rssi_vals = []
     energy_mids = []
     times_ms = []
     payload_bytes = []
-    snr_vals = []
+    total_packets = 0
+    lost_packets = 0
     for row in rows[1:]:
         if len(row) <= i_rssi:
             continue
+        payload_raw = row[i_payload_raw].strip() if i_payload_raw is not None and len(row) > i_payload_raw else ""
+        if payload_raw.startswith("CFG "):
+            continue
+        if payload_raw:
+            total_packets += 1
+            if payload_raw == "PACKET_LOST":
+                lost_packets += 1
         r = parse_float(row[i_rssi])
         if r is not None:
             rssi_vals.append(r)
@@ -110,10 +120,6 @@ def read_file_metrics(path):
             p = parse_float(row[i_payload])
             if p is not None and p > 0:
                 payload_bytes.append(int(p))
-        if i_snr is not None and len(row) > i_snr:
-            s = parse_float(row[i_snr])
-            if s is not None:
-                snr_vals.append(s)
 
     if not rssi_vals:
         return None
@@ -124,21 +130,23 @@ def read_file_metrics(path):
             energy_mids = [e * 1000.0 for e in energy_mids]
 
     rssi_avg = sum(rssi_vals) / len(rssi_vals)
+    rssi_std = float(np.std(rssi_vals)) if len(rssi_vals) >= 2 else 0.0
     energy_mj = sum(energy_mids) / len(energy_mids) if energy_mids else None
-    count = len(rssi_vals)
+    count = total_packets or len(rssi_vals)
     duration_s = (max(times_ms) - min(times_ms)) / 1000.0 if len(times_ms) >= 2 else 0.0
     payload_b = int(sum(payload_bytes) / len(payload_bytes)) if payload_bytes else 37
     total_bits = count * payload_b * 8
     throughput_bps = total_bits / duration_s if duration_s > 0 else None
     energy_per_bit_uj = (sum(energy_mids) * 1000.0 / total_bits) if energy_mids and total_bits > 0 else None
-    snr_avg = sum(snr_vals) / len(snr_vals) if snr_vals else None
+    per_pct = (100.0 * lost_packets / count) if count > 0 else None
 
     return {
         "rssi_avg": rssi_avg,
+        "rssi_std": rssi_std,
         "energy_mj": energy_mj,
         "throughput_bps": throughput_bps,
         "energy_per_bit_uj": energy_per_bit_uj,
-        "snr_db": snr_avg,
+        "per_pct": per_pct,
         "count": count,
     }
 
@@ -171,6 +179,407 @@ def collect_rssi_data(data_root):
     return records
 
 
+SF_BW_METRIC_KEYS = (
+    "rssi_avg",
+    "rssi_std",
+    "energy_mj",
+    "throughput_bps",
+    "energy_per_bit_uj",
+    "per_pct",
+    "count",
+)
+
+
+def _get_sf_bw_order():
+    return [(sf, bw) for sf in SF_VALUES for bw in BW_VALUES]
+
+
+def _sf_bw_label(sf, bw):
+    return f"{sf},{_fmt_bw(bw / 1000.0)}"
+
+
+def aggregate_rssi_by_distance_sf_bw(records):
+    """Aggregate per-file metrics over TP for each (distance, SF, BW) tuple."""
+    grouped = defaultdict(lambda: defaultdict(list))
+    for distance, sf, bw, tp, metrics in records:
+        bucket = grouped[(distance, sf, bw)]
+        bucket["tp_values"].append(tp)
+        for metric_key in SF_BW_METRIC_KEYS:
+            value = metrics.get(metric_key)
+            if value is not None:
+                bucket[metric_key].append(float(value))
+
+    aggregated = []
+    for (distance, sf, bw), bucket in sorted(grouped.items()):
+        row = {"distance": distance, "sf": sf, "bw": bw, "tp_count": len(bucket["tp_values"])}
+        for metric_key in SF_BW_METRIC_KEYS:
+            values = bucket.get(metric_key, [])
+            row[metric_key] = float(np.mean(values)) if values else None
+        aggregated.append(row)
+    return aggregated
+
+
+def _build_distance_cfg_matrix(agg_records, metric_key):
+    cfgs = _get_sf_bw_order()
+    distances = sorted({row["distance"] for row in agg_records})
+    cfg_to_idx = {cfg: i for i, cfg in enumerate(cfgs)}
+    dist_to_idx = {distance: i for i, distance in enumerate(distances)}
+    mat = np.full((len(cfgs), len(distances)), np.nan)
+    for row in agg_records:
+        value = row.get(metric_key)
+        if value is None:
+            continue
+        cfg_idx = cfg_to_idx[(row["sf"], row["bw"])]
+        dist_idx = dist_to_idx[row["distance"]]
+        mat[cfg_idx, dist_idx] = float(value)
+    return np.array(distances, dtype=float), cfgs, mat
+
+
+def _build_distance_sf_matrix(agg_records, bw, metric_key):
+    distances = sorted({row["distance"] for row in agg_records if row["bw"] == bw})
+    dist_to_idx = {distance: i for i, distance in enumerate(distances)}
+    sf_to_idx = {sf: i for i, sf in enumerate(SF_VALUES)}
+    mat = np.full((len(SF_VALUES), len(distances)), np.nan)
+    for row in agg_records:
+        if row["bw"] != bw:
+            continue
+        value = row.get(metric_key)
+        if value is None:
+            continue
+        mat[sf_to_idx[row["sf"]], dist_to_idx[row["distance"]]] = float(value)
+    return np.array(distances, dtype=float), np.array(SF_VALUES, dtype=float), mat
+
+
+def _fmt_distance(d):
+    return str(int(d)) if abs(d - round(d)) < 1e-6 else f"{d:.2f}".rstrip("0").rstrip(".")
+
+
+def _set_distance_ticks(ax, distances):
+    tick_values = distances[::2] if len(distances) > 8 else distances
+    if tick_values[-1] != distances[-1]:
+        tick_values = np.append(tick_values, distances[-1])
+    ax.set_xticks(tick_values)
+    ax.set_xticklabels([_fmt_distance(d) for d in tick_values])
+
+
+def _set_cfg_ticks(ax, cfgs, step=2):
+    idxs = list(range(0, len(cfgs), step))
+    if idxs[-1] != len(cfgs) - 1:
+        idxs.append(len(cfgs) - 1)
+    ax.set_yticks(idxs)
+    ax.set_yticklabels([_sf_bw_label(*cfgs[i]) for i in idxs])
+
+
+def _style_3d_axes(ax, elev=27, azim=-61, box_aspect=(1.55, 1.0, 0.82)):
+    ax.view_init(elev=elev, azim=azim)
+    ax.tick_params(axis="x", labelsize=IEEE_FONTSIZE - 1, pad=1)
+    ax.tick_params(axis="y", labelsize=IEEE_FONTSIZE - 1, pad=1)
+    ax.tick_params(axis="z", labelsize=IEEE_FONTSIZE - 1, pad=1)
+    try:
+        ax.set_box_aspect(box_aspect)
+    except Exception:
+        pass
+    for pane in (ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane):
+        pane.set_alpha(0.10)
+        pane.set_edgecolor((0.35, 0.35, 0.35, 0.25))
+    ax.grid(True, alpha=0.35)
+
+
+def _norm_from_matrix(mat):
+    values = np.asarray(mat, dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    if abs(vmax - vmin) < 1e-9:
+        vmax = vmin + 1.0
+    return mcolors.Normalize(vmin=vmin, vmax=vmax)
+
+
+def _plot_rssi_colored_surface(
+    ax,
+    x_values,
+    y_values,
+    z_matrix,
+    color_matrix,
+    color_norm,
+    z_label,
+    y_label,
+    y_tick_labels=None,
+    y_tick_step=1,
+    panel_text=None,
+    color_cmap="viridis",
+    project_floor=False,
+):
+    if np.all(np.isnan(z_matrix)) or np.all(np.isnan(color_matrix)):
+        return False
+
+    x_values = np.asarray(x_values, dtype=float)
+    y_values = np.asarray(y_values, dtype=float)
+    z_matrix = np.asarray(z_matrix, dtype=float)
+    color_matrix = np.asarray(color_matrix, dtype=float)
+    x_grid, y_grid = np.meshgrid(x_values, y_values)
+    z_masked = np.ma.masked_invalid(z_matrix)
+    color_fill = np.where(np.isnan(color_matrix), color_norm.vmin, color_matrix)
+    cmap_obj = plt.get_cmap(color_cmap)
+    facecolors = cmap_obj(color_norm(color_fill))
+    z_min = float(np.nanmin(z_matrix))
+    z_max = float(np.nanmax(z_matrix))
+    z_span = max(z_max - z_min, 1.0)
+    z_floor = z_min - (0.18 if project_floor else 0.08) * z_span
+
+    ax.plot_surface(
+        x_grid,
+        y_grid,
+        z_masked,
+        facecolors=facecolors,
+        rcount=z_matrix.shape[0],
+        ccount=z_matrix.shape[1],
+        edgecolor=(0.08, 0.08, 0.08, 0.18),
+        linewidth=0.35,
+        antialiased=True,
+        shade=False,
+        alpha=0.98,
+    )
+    if project_floor:
+        ax.contourf(
+            x_grid,
+            y_grid,
+            np.ma.masked_invalid(color_matrix),
+            zdir="z",
+            offset=z_floor,
+            levels=np.linspace(color_norm.vmin, color_norm.vmax, 9),
+            cmap=color_cmap,
+            norm=color_norm,
+            alpha=0.90,
+        )
+
+    ax.set_xlim(float(x_values.min()), float(x_values.max()))
+    ax.set_ylim(float(y_values.min()), float(y_values.max()))
+    ax.set_zlim(z_floor, z_max + 0.06 * z_span)
+    ax.set_xlabel("Distance (m)", fontsize=IEEE_FONTSIZE, labelpad=3)
+    ax.set_ylabel(y_label, fontsize=IEEE_FONTSIZE, labelpad=5)
+    ax.set_zlabel(z_label, fontsize=IEEE_FONTSIZE, labelpad=4)
+    ax.zaxis.label.set_verticalalignment("top")
+    _set_distance_ticks(ax, x_values)
+    if y_tick_labels is None:
+        ax.set_yticks(y_values[::y_tick_step])
+        ax.set_yticklabels([str(int(v)) if abs(v - round(v)) < 1e-6 else str(v) for v in y_values[::y_tick_step]])
+    else:
+        idxs = list(range(0, len(y_values), y_tick_step))
+        if idxs[-1] != len(y_values) - 1:
+            idxs.append(len(y_values) - 1)
+        ax.set_yticks(y_values[idxs])
+        ax.set_yticklabels([y_tick_labels[i] for i in idxs])
+    _style_3d_axes(ax)
+    if panel_text:
+        ax.text2D(
+            0.03,
+            0.95,
+            panel_text,
+            transform=ax.transAxes,
+            fontsize=IEEE_FONTSIZE,
+            va="top",
+            bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="0.55", alpha=0.85),
+        )
+    return True
+
+
+def _add_metric_colorbar(fig, axes, norm, label, cmap="viridis"):
+    sm = ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=axes, shrink=0.80, pad=0.02, aspect=26)
+    cbar.set_label(label, fontsize=IEEE_FONTSIZE)
+    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE - 1)
+
+
+def plot_rssi_distance_sfbw_surface(agg_records, output_png):
+    """Surface: x=distance, y=SF/BW config, z=avg RSSI, color=energy per bit."""
+    os.makedirs(os.path.dirname(output_png), exist_ok=True)
+    distances, cfgs, rssi_mat = _build_distance_cfg_matrix(agg_records, "rssi_avg")
+    if np.all(np.isnan(rssi_mat)):
+        return
+    _, _, energy_bit_mat = _build_distance_cfg_matrix(agg_records, "energy_per_bit_uj")
+    color_mat = energy_bit_mat if not np.all(np.isnan(energy_bit_mat)) else rssi_mat
+    color_norm = _norm_from_matrix(color_mat)
+    color_label = r"Energy per bit ($\mu$J)" if not np.all(np.isnan(energy_bit_mat)) else r"RSSI (avg) (dBm)"
+    color_cmap = "cividis" if not np.all(np.isnan(energy_bit_mat)) else "viridis"
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    ax = fig.add_subplot(111, projection="3d")
+    _plot_rssi_colored_surface(
+        ax,
+        distances,
+        np.arange(len(cfgs), dtype=float),
+        rssi_mat,
+        color_mat,
+        color_norm,
+        r"RSSI (avg) (dBm)",
+        "SF/BW cfg",
+        y_tick_labels=[_sf_bw_label(*cfg) for cfg in cfgs],
+        y_tick_step=2,
+        color_cmap=color_cmap,
+        project_floor=False,
+    )
+    _add_metric_colorbar(fig, ax, color_norm, color_label, cmap=color_cmap)
+    fig.subplots_adjust(left=0.04, right=0.90, top=0.96, bottom=0.06)
+    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_png}")
+
+
+def plot_rssi_distance_sfbw_bars(agg_records, output_png):
+    """3D bars: x=distance, y=SF/BW config, z=avg RSSI, color=PER."""
+    os.makedirs(os.path.dirname(output_png), exist_ok=True)
+    distances, cfgs, rssi_mat = _build_distance_cfg_matrix(agg_records, "rssi_avg")
+    if np.all(np.isnan(rssi_mat)):
+        return
+    _, _, per_mat = _build_distance_cfg_matrix(agg_records, "per_pct")
+    rssi_min = float(np.nanmin(rssi_mat))
+    rssi_max = float(np.nanmax(rssi_mat))
+    rssi_span = max(rssi_max - rssi_min, 1.0)
+    rssi_floor = rssi_min - 0.22 * rssi_span
+    per_norm = _norm_from_matrix(per_mat) if not np.all(np.isnan(per_mat)) else None
+
+    x_grid, y_grid = np.meshgrid(distances, np.arange(len(cfgs), dtype=float))
+    mask = ~np.isnan(rssi_mat)
+    if not np.any(mask):
+        return
+    dist_step = float(np.min(np.diff(distances))) if len(distances) > 1 else 1.0
+    dx = 0.68 * dist_step
+    dy = 0.58
+
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    ax = fig.add_subplot(111, projection="3d")
+    if per_norm is not None:
+        bar_colors = plt.cm.inferno(per_norm(np.where(mask, per_mat, per_norm.vmin)[mask]))
+    else:
+        bar_colors = np.tile(np.array([[0.28, 0.52, 0.64, 0.95]]), (mask.sum(), 1))
+    ax.bar3d(
+        x_grid[mask] - dx / 2.0,
+        y_grid[mask] - dy / 2.0,
+        np.full(mask.sum(), rssi_floor),
+        np.full(mask.sum(), dx),
+        np.full(mask.sum(), dy),
+        rssi_mat[mask] - rssi_floor,
+        color=bar_colors,
+        edgecolor=(0.08, 0.08, 0.08, 0.9),
+        linewidth=0.18,
+        shade=True,
+        alpha=0.97,
+    )
+    ax.set_xlim(float(distances.min()), float(distances.max()))
+    ax.set_ylim(0, len(cfgs) - 1)
+    ax.set_zlim(rssi_floor, rssi_max + 0.04 * rssi_span)
+    ax.set_xlabel("Distance (m)", fontsize=IEEE_FONTSIZE, labelpad=3)
+    ax.set_ylabel("SF/BW cfg", fontsize=IEEE_FONTSIZE, labelpad=5)
+    ax.set_zlabel(r"RSSI (avg) (dBm)", fontsize=IEEE_FONTSIZE, labelpad=4)
+    ax.zaxis.label.set_verticalalignment("top")
+    _set_distance_ticks(ax, distances)
+    _set_cfg_ticks(ax, cfgs, step=2)
+    _style_3d_axes(ax, elev=25, azim=-63)
+    if per_norm is not None:
+        _add_metric_colorbar(fig, ax, per_norm, "PER (%)", cmap="inferno")
+    fig.subplots_adjust(left=0.04, right=0.90, top=0.96, bottom=0.06)
+    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_png}")
+
+
+def plot_rssi_distance_sf_by_bw_surfaces(agg_records, output_png):
+    """2x2 BW panels: x=distance, y=SF, z=avg RSSI, color=energy per bit."""
+    os.makedirs(os.path.dirname(output_png), exist_ok=True)
+    mats = []
+    for bw in BW_VALUES:
+        distances, sf_vals, rssi_mat = _build_distance_sf_matrix(agg_records, bw, "rssi_avg")
+        _, _, energy_bit_mat = _build_distance_sf_matrix(agg_records, bw, "energy_per_bit_uj")
+        mats.append((bw, distances, sf_vals, rssi_mat, energy_bit_mat))
+    valid_rssi_mats = [rssi_mat for _, _, _, rssi_mat, _ in mats if not np.all(np.isnan(rssi_mat))]
+    valid_energy_mats = [energy_bit_mat for _, _, _, _, energy_bit_mat in mats if not np.all(np.isnan(energy_bit_mat))]
+    if not valid_rssi_mats:
+        return
+    color_cmap = "cividis" if valid_energy_mats else "viridis"
+    color_label = r"Energy per bit ($\mu$J)" if valid_energy_mats else r"RSSI (avg) (dBm)"
+    color_norm = _norm_from_matrix(
+        np.vstack(valid_energy_mats) if valid_energy_mats else np.vstack(valid_rssi_mats)
+    )
+
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    axes = []
+    for idx, (bw, distances, sf_vals, rssi_mat, energy_bit_mat) in enumerate(mats):
+        ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
+        axes.append(ax)
+        if np.all(np.isnan(rssi_mat)):
+            ax.set_axis_off()
+            continue
+        color_mat = energy_bit_mat if not np.all(np.isnan(energy_bit_mat)) else rssi_mat
+        _plot_rssi_colored_surface(
+            ax,
+            distances,
+            sf_vals,
+            rssi_mat,
+            color_mat,
+            color_norm,
+            r"RSSI (avg) (dBm)",
+            "SF",
+            y_tick_labels=[str(sf) for sf in SF_VALUES],
+            y_tick_step=1,
+            panel_text=f"BW {_fmt_bw(bw / 1000.0)} kHz",
+            color_cmap=color_cmap,
+            project_floor=False,
+        )
+    _add_metric_colorbar(fig, axes, color_norm, color_label, cmap=color_cmap)
+    fig.subplots_adjust(left=0.02, right=0.92, top=0.96, bottom=0.05, wspace=0.02, hspace=0.08)
+    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_png}")
+
+
+def plot_rssi_distance_signal_tradeoff_surfaces(agg_records, output_png):
+    """Two-panel tradeoff view: energy/PER as z, RSSI as the color cue."""
+    os.makedirs(os.path.dirname(output_png), exist_ok=True)
+    distances, cfgs, rssi_mat = _build_distance_cfg_matrix(agg_records, "rssi_avg")
+    if np.all(np.isnan(rssi_mat)):
+        return
+    metric_specs = [
+        ("energy_per_bit_uj", r"Energy per bit ($\mu$J)"),
+        ("per_pct", "PER (%)"),
+    ]
+    panel_mats = []
+    for metric_key, metric_label in metric_specs:
+        _, _, metric_mat = _build_distance_cfg_matrix(agg_records, metric_key)
+        if not np.all(np.isnan(metric_mat)):
+            panel_mats.append((metric_label, metric_mat))
+    if not panel_mats:
+        return
+
+    rssi_norm = _norm_from_matrix(rssi_mat)
+    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    axes = []
+    for idx, (metric_label, metric_mat) in enumerate(panel_mats):
+        ax = fig.add_subplot(1, len(panel_mats), idx + 1, projection="3d")
+        axes.append(ax)
+        _plot_rssi_colored_surface(
+            ax,
+            distances,
+            np.arange(len(cfgs), dtype=float),
+            metric_mat,
+            rssi_mat,
+            rssi_norm,
+            metric_label,
+            "SF/BW cfg",
+            y_tick_labels=[_sf_bw_label(*cfg) for cfg in cfgs],
+            y_tick_step=3,
+            color_cmap="viridis",
+            project_floor=False,
+        )
+    _add_metric_colorbar(fig, axes, rssi_norm, r"RSSI (avg) (dBm)", cmap="viridis")
+    fig.subplots_adjust(left=0.03, right=0.92, top=0.96, bottom=0.06, wspace=0.08)
+    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_png}")
+
+
 def plot_rssi_vs_x(records, x_key, x_label, output_png, x_unit=""):
     """Scatter: RSSI (avg) vs x_key. Color by SF."""
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
@@ -191,8 +600,6 @@ def plot_rssi_vs_x(records, x_key, x_label, output_png, x_unit=""):
             x_val = m.get("throughput_bps")
         elif x_key == "energy_per_bit_uj":
             x_val = m.get("energy_per_bit_uj")
-        elif x_key == "snr_db":
-            x_val = m.get("snr_db")
         if x_val is None:
             continue
         points.append((sf, bw, x_val, m["rssi_avg"]))
@@ -267,12 +674,12 @@ def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=
     scale_ax.axis("off")
 
     grad_x0, grad_y0 = 0.08, 0.18
-    grad_w, grad_h = 0.64, 0.12
+    grad_w, grad_h = 1.2, 0.12
     tick_len = 0.07
     tick_gap = 0.045
-    label_gap = 0.14
-    cx = grad_x0 + 0.5 * grad_w
-    cy = grad_y0 + 0.5 * grad_h
+    label_gap = 0.16
+    cx = grad_x0 + 0.4 * grad_w
+    cy = grad_y0 + 0.8 * grad_h
     rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, angle_deg) + scale_ax.transAxes
 
     gradient = np.linspace(vmin, vmax, 256).reshape(1, -1)
@@ -338,7 +745,7 @@ def _add_rotated_rssi_scale(fig, ax, cmap, vmin, vmax, label, angle_deg=45, loc=
         rotation=text_angle_deg,
         rotation_mode="anchor",
         ha="center",
-        va="bottom",
+        va="top",
         fontsize=fontsize,
         clip_on=False,
         zorder=5,
@@ -620,8 +1027,8 @@ def plot_rssi_3d_combined(records, output_png):
             float(sc.norm.vmax),
             r"RSSI (avg) (dBm)",
             angle_deg=225,
-            text_angle_deg=45,
-            loc=(0.00, 0.71),
+            text_angle_deg=40,
+            loc=(0.00, 0.75),
             size=(0.42, 0.28),
             fontsize=IEEE_FONTSIZE,
         )
@@ -651,10 +1058,19 @@ def main():
     records = collect_rssi_data(args.data_root)
     if not records:
         raise RuntimeError("No RSSI data found.")
+    agg_records = aggregate_rssi_by_distance_sf_bw(records)
 
     plot_rssi_3d_combined(records, os.path.join(args.output_dir, "raw_rssi_3d_combined.png"))
-    plot_rssi_config_vs_distance_heatmap(records, os.path.join(args.output_dir, "raw_rssi_config_vs_distance.png"))
-    plot_rssi_config_distance_energy_3d(records, os.path.join(args.output_dir, "raw_rssi_config_distance_energy_3d.png"))
+    plot_rssi_distance_sfbw_surface(agg_records, os.path.join(args.output_dir, "raw_rssi_distance_sfbw_surface.png"))
+    plot_rssi_distance_sfbw_bars(agg_records, os.path.join(args.output_dir, "raw_rssi_distance_sfbw_bars.png"))
+    plot_rssi_distance_sf_by_bw_surfaces(
+        agg_records,
+        os.path.join(args.output_dir, "raw_rssi_distance_sf_by_bw_surfaces.png"),
+    )
+    plot_rssi_distance_signal_tradeoff_surfaces(
+        agg_records,
+        os.path.join(args.output_dir, "raw_rssi_distance_signal_tradeoff.png"),
+    )
 
 
 if __name__ == "__main__":
