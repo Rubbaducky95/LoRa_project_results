@@ -72,11 +72,11 @@ def get_file_order():
 
 
 def format_sf_bw_label(raw_label):
-    """Convert 'SF7 BW62.5' or 'SF7_BW62.5' to '7, 62.5'."""
+    """Convert 'SF7 BW62.5' or 'SF7_BW62.5' to '(7, 62.5)' (numbers only)."""
     s = raw_label.replace("_", " ")
-    m = re.match(r"(SF(\d+)\s*BW([\d.]+))", s)
+    m = re.match(r"SF(\d+)\s*BW([\d.]+)", s)
     if m:
-        return f"{m.group(1)}, {m.group(2)}"
+        return f"({m.group(1)}, {m.group(2)})"
     return s
 
 
@@ -241,16 +241,13 @@ def main():
         sigma = min(5, max(1, len(avg_times) // 100))
         times_smooth = gaussian_smooth(avg_times, sigma=sigma)
 
-        xtick_positions = [0] + [p for p, _, _ in sf_bw_changes]
-        xtick_labels = [l.replace("_", " ") for l in ["SF7_BW62.5"] + [lbl for _, lbl, _ in sf_bw_changes]]
-
         # Combined plot v3: packet index on X-axis, dotted lines from curve up, labels black and rotated
         FONTSIZE = IEEE_FONTSIZE
         dotted_positions = [0] + [p for p, _, _ in sf_bw_changes]
         fig4, ax4 = plt.subplots(figsize=FIGSIZE_TWO_COL)
-        ax4.plot(indices_avg, times_smooth / 1000, "b-", linewidth=2.2, alpha=0.9)
-        ax4.set_xlabel("Packet idx (300 pkt/cfg)", fontsize=FONTSIZE)
-        ax4.set_ylabel(r"$T_{\mathrm{init}}$ = Time since first packet sent (s)", fontsize=FONTSIZE)
+        ax4.plot(indices_avg, times_smooth / 1000, color="#1f77b4", linewidth=2.2, alpha=0.9)
+        ax4.set_xlabel("Packet Index", fontsize=FONTSIZE)
+        ax4.set_ylabel(r"$T_{\mathrm{init}}$ (s)", fontsize=FONTSIZE)
         ax4.tick_params(axis="both", labelsize=FONTSIZE)
         xmax = ax4.get_xlim()[1]
         ax4.set_xlim(xmax=xmax - 300)
@@ -259,125 +256,111 @@ def main():
         ymax = ax4.get_ylim()[1]
         ymin = ax4.get_ylim()[0]
         y_range = ymax - ymin
+        min_width_cfg = 6
+        min_width_ts = 8
         cfg_box_style = dict(
-            boxstyle="round,pad=0.06",
-            facecolor="#dbe7f3",
-            edgecolor="#2f3e4e",
-            linewidth=1.0,
+            boxstyle="round,pad=0.06,rounding_size=0.5",
+            facecolor="#b8d4e8",
+            edgecolor="#2c5aa0",
+            linewidth=0.7,
             alpha=0.95,
         )
         ts_box_style = dict(
-            boxstyle="round,pad=0.08",
-            facecolor="#e7efcf",
-            edgecolor="#2f3e4e",
-            linewidth=1.0,
+            boxstyle="round,pad=0.12",
+            facecolor="#ffe4b8",
+            edgecolor="#b8860b",
+            linewidth=0.9,
             alpha=0.95,
         )
-        connector_style = dict(color="#7a7a7a", linestyle="--", linewidth=0.8, alpha=0.75, zorder=10)
-        cfg_rotation_above = 45
-        cfg_rotation_below = 50
+        connector_style = dict(color="#5a8ab8", linestyle="--", linewidth=0.8, alpha=0.8, zorder=1)
+        cfg_rotation_above = 0
+        cfg_rotation_below = 0
 
         def measure_box_height(sample_text, rotation, bbox_style):
             probe = ax4.text(
-                0,
-                0,
-                sample_text,
-                fontsize=FONTSIZE,
-                rotation=rotation,
-                va="center",
-                ha="center",
-                transform=ax4.transData,
-                bbox=bbox_style,
+                0, 0, sample_text, fontsize=FONTSIZE, rotation=rotation,
+                va="center", ha="center", transform=ax4.transData, bbox=bbox_style,
             )
             fig4.canvas.draw()
             bbox = probe.get_window_extent(renderer=fig4.canvas.get_renderer()).transformed(ax4.transData.inverted())
             probe.remove()
             return abs(bbox.height)
 
-        config_text_height_above = measure_box_height("7, 62.5", cfg_rotation_above, cfg_box_style)
-        config_text_height_below = measure_box_height("12, 500", cfg_rotation_below, cfg_box_style)
-        timestamp_text_height = measure_box_height("20.0e3", 0, ts_box_style)
+        ts_box_height = measure_box_height("20000 s".center(min_width_ts + 2), 0, ts_box_style)
+        cfg_box_height = measure_box_height("(7, 62.5)".center(min_width_cfg), 0, cfg_box_style)
+        spacing = max(0.04 * y_range, 0.65 * ts_box_height)
 
-        top_margin = 0.04 * y_range
-        bottom_margin = 0.04 * y_range
-        row_gap = max(0.02 * y_range, 0.55 * timestamp_text_height)
-        block_gap = max(0.03 * y_range, 0.75 * timestamp_text_height)
-        ts_line_end_offset_above = 0.18 * timestamp_text_height
-        ts_line_start_offset_below = 0.18 * timestamp_text_height
-
-        y_ts_odd_above = ymax - top_margin - 0.5 * timestamp_text_height
-        y_ts_even_above = y_ts_odd_above - (timestamp_text_height + row_gap)
-        y_cfg_odd_above = y_ts_even_above - (0.5 * timestamp_text_height + 0.5 * config_text_height_above + block_gap)
-        y_cfg_even_above = y_cfg_odd_above - (config_text_height_above + row_gap)
-
-        y_ts_even_below = ymin + bottom_margin + 0.5 * timestamp_text_height
-        y_ts_odd_below = y_ts_even_below + (timestamp_text_height + row_gap)
-        y_cfg_even_below = y_ts_odd_below + (0.5 * timestamp_text_height + 0.5 * config_text_height_below + block_gap)
-        y_cfg_odd_below = y_cfg_even_below + (config_text_height_below + row_gap)
-
-        above_ts_shift = max(0.02 * y_range, 0.45 * timestamp_text_height)
-        below_ts_shift = max(0.015 * y_range, 0.30 * timestamp_text_height)
-        below_cfg_drop_even = max(0.025 * y_range, 0.22 * config_text_height_below)
-        below_cfg_drop_odd = max(0.015 * y_range, 0.10 * config_text_height_below)
-        last_above_cfg_raise = 0.38 * config_text_height_above
-        second_last_above_cfg_raise = 0.22 * config_text_height_above
-
-        y_ts_odd_above -= above_ts_shift
-        y_ts_even_above -= above_ts_shift
-        y_ts_odd_below += below_ts_shift
-        y_ts_even_below += below_ts_shift
-        y_cfg_even_below -= below_cfg_drop_even
-        y_cfg_odd_below -= below_cfg_drop_odd
         n_configs = len(dotted_positions)
-        half = n_configs // 2 + 4  # move one more from below to above
+        half = 15  # cfg/ts 0-14 above curve, 15-21 below
         dotted_with_labels = list(zip(dotted_positions, [format_sf_bw_label(l) for l in ["SF7_BW62.5"] + [lbl for _, lbl, _ in sf_bw_changes]]))
+
+        ts1_even = ymax - spacing - ts_box_height
+        ts1_odd = ts1_even - ts_box_height - spacing
+        cfg1_7 = ts1_odd - spacing
+        ts2_even = ts1_even
+        ts2_odd = ts1_odd
+        cfg8_15 = cfg1_7
+        ts3_odd = ymin + spacing + ts_box_height
+        ts3_even = ts3_odd + spacing + ts_box_height
+        cfg_even_below = ts3_even + spacing
+        cfg_odd_below = cfg_even_below + cfg_box_height + spacing
+
+        cfg_even_off = cfg_box_height + spacing
+        y_cfg = []
+        y_ts = []
+        for i in range(n_configs):
+            if i < 7:
+                y_ts.append(ts1_odd if i % 2 == 1 else ts1_even)
+                y_cfg.append(cfg1_7 - cfg_even_off if i % 2 == 1 else cfg1_7)
+            elif i < 8:
+                y_ts.append(ts1_odd if i % 2 == 1 else ts1_even)
+                y_cfg.append(cfg1_7 - cfg_even_off if i % 2 == 1 else cfg1_7)
+            elif i < 15:
+                y_ts.append(ts2_odd if i % 2 == 1 else ts2_even)
+                y_cfg.append(cfg8_15 - cfg_even_off if i % 2 == 1 else cfg8_15)
+            else:
+                y_ts.append(ts3_odd if i % 2 == 1 else ts3_even)
+                y_cfg.append(cfg_even_below if i % 2 == 1 else cfg_odd_below)
+
+        max_ts_width = max(
+            len(f"{np.interp(pkt_idx, indices_avg, times_smooth / 1000):.0f} s")
+            for pkt_idx, _ in dotted_with_labels
+        )
+        ts_line_off = 0.18 * ts_box_height
         for i, (pkt_idx, label) in enumerate(dotted_with_labels):
             y_at_curve = np.interp(pkt_idx, indices_avg, times_smooth / 1000)
-            if y_at_curve >= 10000:
-                ts_str = f"{y_at_curve/1000:.1f}e3"
-            elif y_at_curve < 100:
-                ts_str = f"   {y_at_curve:.0f}   "
-            elif y_at_curve < 1000:
-                ts_str = f"  {y_at_curve:.0f}  "
-            else:
-                ts_str = f" {y_at_curve:.0f} "
+            label_padded = label.center(max(min_width_cfg, len(label)))
+            ts_raw = f"{y_at_curve:.0f} s"
+            ts_str = ts_raw.center(max_ts_width)
             if i < half:
-                y_label = y_cfg_odd_above if i % 2 == 1 else y_cfg_even_above
-                if i == half - 1:
-                    y_label += last_above_cfg_raise
-                elif i == half - 2:
-                    y_label += second_last_above_cfg_raise
-                y_end = y_ts_odd_above if i % 2 == 1 else y_ts_even_above
-                cfg_lo = y_label - config_text_height_above * 0.4
-                cfg_hi = y_label + config_text_height_above * 0.4
-                y_line_end = y_end - ts_line_end_offset_above
+                cfg_lo = y_cfg[i] - cfg_box_height * 0.92
+                cfg_hi = y_cfg[i]
+                y_line_end = y_ts[i] - ts_line_off
                 ax4.plot([pkt_idx, pkt_idx], [y_at_curve, cfg_lo], **connector_style)
                 ax4.plot([pkt_idx, pkt_idx], [cfg_hi, y_line_end], **connector_style)
-                ax4.text(pkt_idx, y_label, label, fontsize=FONTSIZE, rotation=cfg_rotation_above, va="center", ha="center", color="black",
-                         bbox=cfg_box_style)
-                ax4.text(pkt_idx, y_end, ts_str, fontsize=FONTSIZE, va="bottom", ha="center", color="black",
-                         bbox=ts_box_style)
+                ax4.text(pkt_idx, y_cfg[i], label_padded, fontsize=FONTSIZE, rotation=cfg_rotation_above, va="top", ha="center", color="black",
+                         bbox=cfg_box_style, zorder=15)
+                ax4.text(pkt_idx, y_ts[i], ts_str, fontsize=FONTSIZE, va="bottom", ha="center", color="black",
+                         bbox=ts_box_style, zorder=15)
             else:
-                y_label = y_cfg_odd_below if i % 2 == 1 else y_cfg_even_below
-                y_end = y_ts_odd_below if i % 2 == 1 else y_ts_even_below
-                cfg_lo = y_label - config_text_height_below * 0.4
-                cfg_hi = y_label + config_text_height_below * 0.4
-                y_line_start = y_end + ts_line_start_offset_below
+                cfg_lo = y_cfg[i]
+                cfg_hi = y_cfg[i] + cfg_box_height * 0.92
+                y_line_start = y_ts[i] + ts_line_off
                 ax4.plot([pkt_idx, pkt_idx], [y_line_start, cfg_lo], **connector_style)
                 ax4.plot([pkt_idx, pkt_idx], [cfg_hi, y_at_curve], **connector_style)
-                ax4.text(pkt_idx, y_label, label, fontsize=FONTSIZE, rotation=cfg_rotation_below, va="center", ha="center", color="black",
-                         bbox=cfg_box_style)
-                ax4.text(pkt_idx, y_end, ts_str, fontsize=FONTSIZE, va="top", ha="center", color="black",
-                         bbox=ts_box_style)
+                ax4.text(pkt_idx, y_cfg[i], label_padded, fontsize=FONTSIZE, rotation=cfg_rotation_below, va="bottom", ha="center", color="black",
+                         bbox=cfg_box_style, zorder=15)
+                ax4.text(pkt_idx, y_ts[i], ts_str, fontsize=FONTSIZE, va="top", ha="center", color="black",
+                         bbox=ts_box_style, zorder=15)
         legend_elements = [
-            Patch(facecolor=cfg_box_style["facecolor"], edgecolor=cfg_box_style["edgecolor"], label="SF, BW"),
+            Patch(facecolor=cfg_box_style["facecolor"], edgecolor=cfg_box_style["edgecolor"], label="(SF, BW)"),
             Patch(facecolor=ts_box_style["facecolor"], edgecolor=ts_box_style["edgecolor"], label=r"$T_{\mathrm{init}}$ at config"),
         ]
         ax4.legend(handles=legend_elements, loc="upper right", fontsize=FONTSIZE)
         fig4.tight_layout()
-        fig4.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v3.png"), dpi=220, bbox_inches="tight")
+        fig4.savefig(os.path.join(out_dir, "raw_time_since_transmission_init_combined_v4.png"), dpi=220, bbox_inches="tight")
         plt.close()
-        print("Saved: raw_time_since_transmission_init_combined_v3.png")
+        print("Saved: raw_time_since_transmission_init_combined_v4.png")
         # Save CSV to parent folder (raw_test_data_plots) to avoid breaking other scripts
         csv_dir = os.path.join(WORKSPACE, "results", "raw_test_data_plots")
         csv_path = os.path.join(csv_dir, "config_change_T_init.csv")
