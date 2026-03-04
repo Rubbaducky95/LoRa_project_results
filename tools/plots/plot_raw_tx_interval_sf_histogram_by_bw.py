@@ -27,6 +27,7 @@ from plot_rssi_vs_multiple import (
     _add_rotated_rssi_scale,
     _fmt_bw,
     _position_3d_z_label_top,
+    _set_3d_tick_pads,
     _style_3d_axes,
 )
 
@@ -49,6 +50,9 @@ COLOR_METRICS = {
     "std_tx": ("std_tx_interval_ms", "Std. dev. of TX interval (ms)", "plasma"),
     "count": ("file_count", "Files", "plasma"),
 }
+
+TX_INTERVAL_STD_LABEL = r"$\sigma(T_{\mathrm{tx\,interval}})$ (ms)"
+TX_TICK_PADS = {"x": -5.0, "y": 0.0, "z": 0.0}
 
 
 def setup_plot_style():
@@ -332,7 +336,7 @@ def _normalize_png_path(output_path):
 def _set_tx_axes(ax, z_max, z_label):
     ax.set_xlabel("SF", labelpad=1.6)
     ax.set_ylabel("BW (kHz)", labelpad=1.8)
-    _position_3d_z_label_top(ax, z_label, 1.03, 0.86, fontsize=IEEE_FONTSIZE)
+    _position_3d_z_label_top(ax, z_label, 1.05, 0.75, fontsize=IEEE_FONTSIZE)
     ax.set_xticks(np.arange(len(SF_VALUES), dtype=float))
     ax.set_xticklabels([str(sf) for sf in SF_VALUES])
     ax.set_yticks(np.arange(len(BW_VALUES_DESC), dtype=float))
@@ -340,6 +344,7 @@ def _set_tx_axes(ax, z_max, z_label):
     ax.set_xlim(-0.6, len(SF_VALUES) - 0.4)
     ax.set_ylim(-0.6, len(BW_VALUES_DESC) - 0.4)
     ax.set_zlim(0.0, z_max * 1.10 if z_max > 0 else 1.0)
+
 
 
 def _add_tx_stand_scale(fig, ax, cmap, norm, color_label):
@@ -354,6 +359,7 @@ def _add_tx_stand_scale(fig, ax, cmap, norm, color_label):
         label_graph_side="left",
         scale_graph_side="stand",
         stand_values_side="left",
+        reverse_cmap=True,
     )
 
 
@@ -399,8 +405,9 @@ def plot_tx_interval_3d_histogram(agg_rows, output_png, color_by="throughput"):
                 alpha=0.98,
             )
 
-    _set_tx_axes(ax, z_max, "TX interval std. dev. (ms)")
+    _set_tx_axes(ax, z_max, TX_INTERVAL_STD_LABEL)
     _style_3d_axes(ax, elev=26, azim=-56, box_aspect=(1.08, 1.0, 0.8))
+    _set_3d_tick_pads(ax, TX_TICK_PADS)
     _add_tx_stand_scale(
         fig,
         ax,
@@ -505,8 +512,9 @@ def plot_tx_interval_3d_ribbons(agg_rows, output_png, color_by="throughput"):
                 zorder=7,
             )
 
-    _set_tx_axes(ax, z_max, "TX interval std. dev. (ms)")
+    _set_tx_axes(ax, z_max, TX_INTERVAL_STD_LABEL)
     _style_3d_axes(ax, elev=26, azim=-56, box_aspect=(1.08, 1.0, 0.8))
+    _set_3d_tick_pads(ax, TX_TICK_PADS)
     _add_tx_stand_scale(
         fig,
         ax,

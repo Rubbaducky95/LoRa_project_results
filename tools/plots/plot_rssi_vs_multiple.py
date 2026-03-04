@@ -276,11 +276,24 @@ def _set_cfg_ticks(ax, cfgs, step=2):
     ax.set_yticklabels([_sf_bw_label(*cfgs[i]) for i in idxs])
 
 
+def _set_3d_tick_pads(ax, pad=0.5, labelsize=IEEE_FONTSIZE):
+    """Set per-axis 3D tick-label padding with a scalar, tuple, or mapping."""
+    axes = ("x", "y", "z")
+    if isinstance(pad, dict):
+        pads = {axis: float(pad.get(axis, 0.5)) for axis in axes}
+    elif isinstance(pad, (tuple, list)) and len(pad) == 3:
+        pads = {axis: float(axis_pad) for axis, axis_pad in zip(axes, pad)}
+    else:
+        scalar = float(pad)
+        pads = {axis: scalar for axis in axes}
+
+    for axis in axes:
+        ax.tick_params(axis=axis, labelsize=labelsize, pad=pads[axis])
+
+
 def _style_3d_axes(ax, elev=27, azim=-61, box_aspect=(1.55, 1.0, 0.82)):
     ax.view_init(elev=elev, azim=azim)
-    ax.tick_params(axis="x", labelsize=IEEE_FONTSIZE, pad=0.5)
-    ax.tick_params(axis="y", labelsize=IEEE_FONTSIZE, pad=0.5)
-    ax.tick_params(axis="z", labelsize=IEEE_FONTSIZE, pad=0.5)
+    _set_3d_tick_pads(ax, 0.3)
     try:
         ax.set_box_aspect(box_aspect)
     except Exception:
@@ -689,6 +702,35 @@ def _project_3d_graph_bbox_axes(fig, ax):
     )
 
 
+def _project_3d_point_axes(fig, ax, x_val, y_val, z_val):
+    """Project one 3D data point into the host axes' normalized coordinates."""
+    try:
+        fig.canvas.draw()
+    except Exception:
+        pass
+
+    try:
+        proj = ax.get_proj()
+        x_proj, y_proj, _ = proj3d.proj_transform(x_val, y_val, z_val, proj)
+        x_disp, y_disp = ax.transData.transform((x_proj, y_proj))
+        x_axes, y_axes = ax.transAxes.inverted().transform((x_disp, y_disp))
+    except Exception:
+        return None
+
+    if not (np.isfinite(x_axes) and np.isfinite(y_axes)):
+        return None
+    return np.array([float(x_axes), float(y_axes)], dtype=float)
+
+
+def _normalize_2d(vec, fallback):
+    """Return a unit-length 2D vector, or the fallback if degenerate."""
+    vec = np.asarray(vec, dtype=float)
+    length = float(np.linalg.norm(vec))
+    if length < 1e-9 or not np.isfinite(length):
+        return np.asarray(fallback, dtype=float)
+    return vec / length
+
+
 def _resolve_xy_scale(scale, name):
     """Normalize a scalar or `(x, y)` scale into a float pair."""
     if np.isscalar(scale):
@@ -756,10 +798,12 @@ def _add_rotated_rssi_scale(
     tick_text_shift=None,
     stand_values_side=None,
     reverse_scale=False,
+    reverse_cmap=False,
 ):
     """Add a compact rotated RSSI scale anchored to a graph-side corner."""
     if fontsize is None:
         fontsize = IEEE_FONTSIZE
+    use_auto_model_label_rotation = label_graph_rotation is None
     if scale_graph_side not in ("left", "right", "stand"):
         raise ValueError(f"Unsupported scale graph side: {scale_graph_side}")
     if stand_values_side is not None and stand_values_side not in ("left", "right"):
@@ -795,23 +839,22 @@ def _add_rotated_rssi_scale(
         default_tick_gap = 0.20
         default_tick_text_shift = (0.05, -0.2)
         default_tick_text_ha = "right"
-    else:
-        # Tune the stand scale directly here; TX plots no longer override these defaults.
-        default_size = (0.2, 0.75)
-        default_loc = (0.0, 0.0)
-        default_angle_deg = 0.0
+    else: # Stand
+        default_size = (0.05, 0.575)
+        default_loc = (-0.075, -0.04)
+        default_angle_deg = -5
         tick_sign = 0
-        default_tick_len = 0.08
-        default_tick_gap = 0.06
+        default_tick_len = 0.02
+        default_tick_gap = 0.02
         default_tick_text_shift = (0.0, 0.0)
         default_tick_text_ha = "left"
 
     if scale_graph_side == "stand" and label_graph_side == "left":
-        default_label_loc = (0.435, 0.60)
-        default_label_rotation = 30.0
+        default_label_loc = (0.05, 0.0)
+        default_label_rotation = 45.0
     elif scale_graph_side == "stand" and label_graph_side == "right":
-        default_label_loc = (0.03, 0.0)
-        default_label_rotation = 90.0
+        default_label_loc = (0.18, 0.0)
+        default_label_rotation = 0.0
     elif scale_graph_side == "left" and label_graph_side == "left":
         default_label_loc = (-0.05, -0.125)
         default_label_rotation = 35.0
@@ -834,8 +877,6 @@ def _add_rotated_rssi_scale(
     else:
         label_loc = (float(label_loc[0]), float(label_loc[1]))
     final_angle_deg = default_angle_deg if angle_deg is None else float(angle_deg)
-    if label_graph_rotation is None:
-        label_graph_rotation = default_label_rotation
     if tick_len is None:
         tick_len = default_tick_len
     if tick_gap is None:
@@ -849,6 +890,23 @@ def _add_rotated_rssi_scale(
     ax_pos = ax.get_position()
     graph_w = max(graph_bbox[2] - graph_bbox[0], 1e-6)
     graph_h = max(graph_bbox[3] - graph_bbox[1], 1e-6)
+    x0, x1 = ax.get_xlim3d()
+    y0, _ = ax.get_ylim3d()
+    z0, z1 = ax.get_zlim3d()
+    axis_origin = _project_3d_point_axes(fig, ax, x0, y0, z0)
+    axis_x_end = _project_3d_point_axes(fig, ax, x1, y0, z0)
+    axis_z_end = _project_3d_point_axes(fig, ax, x0, y0, z1)
+    axis_xz_end = _project_3d_point_axes(fig, ax, x1, y0, z1)
+    if axis_origin is None or axis_x_end is None or axis_z_end is None or axis_xz_end is None:
+        axis_origin = np.array([graph_bbox[0], graph_bbox[1]], dtype=float)
+        axis_x_end = axis_origin + np.array([1.0, 0.0], dtype=float)
+        axis_z_end = axis_origin + np.array([0.0, 1.0], dtype=float)
+        axis_xz_end = np.array([graph_bbox[2], graph_bbox[3]], dtype=float)
+    x_dir = _normalize_2d(axis_x_end - axis_origin, fallback=(1.0, 0.0))
+    z_dir = _normalize_2d(axis_z_end - axis_origin, fallback=(0.0, 1.0))
+    top_left = axis_z_end
+    top_right = axis_xz_end
+    top_edge_dir = _normalize_2d(top_right - top_left, fallback=x_dir)
     if size is None:
         size = default_size
     size = _resolve_scale_size(size, graph_w, graph_h, ax, fig)
@@ -866,54 +924,74 @@ def _add_rotated_rssi_scale(
             graph_bbox[1] + 0.5 * (graph_h - size_axes[1]),
         )
     loc = (base_loc[0] + loc_offset[0], base_loc[1] + loc_offset[1])
-    scale_ax = fig.add_axes(
-        [
-            ax_pos.x0 + loc[0] * ax_pos.width,
-            ax_pos.y0 + loc[1] * ax_pos.height,
-            size_axes[0] * ax_pos.width,
-            size_axes[1] * ax_pos.height,
-        ],
-        zorder=20,
-    )
+    if scale_graph_side == "stand":
+        scale_ax = fig.add_axes(ax_pos, zorder=20)
+    else:
+        scale_ax = fig.add_axes(
+            [
+                ax_pos.x0 + loc[0] * ax_pos.width,
+                ax_pos.y0 + loc[1] * ax_pos.height,
+                size_axes[0] * ax_pos.width,
+                size_axes[1] * ax_pos.height,
+            ],
+            zorder=20,
+        )
     scale_ax.set_xlim(0, 1)
     scale_ax.set_ylim(0, 1)
     scale_ax.axis("off")
 
     scale_color = DEBUG_3D_TEXT_COLOR if DEBUG_DARK_3D_BACKGROUND else "black"
+    cmap_obj = cmap.reversed() if reverse_cmap else cmap
     if scale_graph_side == "stand":
         if stand_values_side is None:
             stand_values_side = "left" if label_graph_side == "right" else "right"
-        grad_x0, grad_y0 = 0.42, 0.02
-        grad_w, grad_h = 0.16, 0.96
-        cx = grad_x0 + 0.5 * grad_w
-        cy = grad_y0 + 0.5 * grad_h
-        rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, final_angle_deg) + scale_ax.transAxes
+        z_axis_len = float(np.linalg.norm(axis_z_end - axis_origin))
+
+        bar_width = size_axes[0]
+        bar_height = size_axes[1]
+        default_gap = 0.015 * graph_w
+        center_offset = 0.5 * max(z_axis_len - bar_height, 0.0)
+        bottom_right = (
+            axis_origin
+            + (loc_offset[0] - default_gap) * x_dir
+            + (center_offset + loc_offset[1]) * z_dir
+        )
+        bottom_left = bottom_right - bar_width * x_dir
+        affine = mtransforms.Affine2D.from_values(
+            bar_width * x_dir[0],
+            bar_width * x_dir[1],
+            bar_height * z_dir[0],
+            bar_height * z_dir[1],
+            bottom_left[0],
+            bottom_left[1],
+        ) + scale_ax.transAxes
+
         if reverse_scale:
             gradient = np.linspace(vmax, vmin, 256).reshape(-1, 1)
         else:
             gradient = np.linspace(vmin, vmax, 256).reshape(-1, 1)
         scale_ax.imshow(
             gradient,
-            extent=(grad_x0, grad_x0 + grad_w, grad_y0, grad_y0 + grad_h),
+            extent=(0.0, 1.0, 0.0, 1.0),
             origin="lower",
             aspect="auto",
-            cmap=cmap,
+            cmap=cmap_obj,
             vmin=vmin,
             vmax=vmax,
             interpolation="bilinear",
-            transform=rot,
+            transform=affine,
             clip_on=False,
             zorder=2,
         )
         scale_ax.add_patch(
             Rectangle(
-                (grad_x0, grad_y0),
-                grad_w,
-                grad_h,
+                (0.0, 0.0),
+                1.0,
+                1.0,
                 fill=False,
                 edgecolor=scale_color,
                 linewidth=0.8,
-                transform=rot,
+                transform=affine,
                 clip_on=False,
                 zorder=3,
             )
@@ -926,33 +1004,32 @@ def _add_rotated_rssi_scale(
                 frac = 1.0 - (tick - vmin) / (vmax - vmin)
             else:
                 frac = (tick - vmin) / (vmax - vmin)
-            y_tick = grad_y0 + frac * grad_h
+            edge_point = bottom_left + frac * bar_height * z_dir
             if stand_values_side == "left":
-                tick_x0 = grad_x0
-                tick_x1 = tick_x0 - tick_len
-                tick_text_x = tick_x1 - tick_gap + tick_text_shift[0]
+                tick_start = edge_point
+                tick_end = tick_start - tick_len * x_dir
+                tick_text_pos = tick_end + (-tick_gap + tick_text_shift[0]) * x_dir + tick_text_shift[1] * z_dir
                 tick_text_ha = "right"
             else:
-                tick_x0 = grad_x0 + grad_w
-                tick_x1 = tick_x0 + tick_len
-                tick_text_x = tick_x1 + tick_gap + tick_text_shift[0]
+                tick_start = edge_point + bar_width * x_dir
+                tick_end = tick_start + tick_len * x_dir
+                tick_text_pos = tick_end + (tick_gap + tick_text_shift[0]) * x_dir + tick_text_shift[1] * z_dir
                 tick_text_ha = "left"
-            tick_text_y = y_tick + tick_text_shift[1]
             scale_ax.plot(
-                [tick_x0, tick_x1],
-                [y_tick, y_tick],
+                [tick_start[0], tick_end[0]],
+                [tick_start[1], tick_end[1]],
                 color=scale_color,
                 linewidth=0.8,
-                transform=rot,
+                transform=scale_ax.transAxes,
                 clip_on=False,
                 zorder=4,
             )
             tick_text = f"{tick:.0f}" if abs(tick - round(tick)) < 1e-6 else f"{tick:.1f}"
             scale_ax.text(
-                tick_text_x,
-                tick_text_y,
+                tick_text_pos[0],
+                tick_text_pos[1],
                 tick_text,
-                transform=rot,
+                transform=scale_ax.transAxes,
                 ha=tick_text_ha,
                 va="center",
                 fontsize=fontsize,
@@ -969,22 +1046,33 @@ def _add_rotated_rssi_scale(
                 pass
             ax._rotated_scale_label_text = None
 
+        top_left = bottom_left + bar_height * z_dir
+        top_right = bottom_right + bar_height * z_dir
+        top_edge_dir = _normalize_2d(top_right - top_left, fallback=x_dir)
+
+        if use_auto_model_label_rotation:
+            if label_graph_side == "left":
+                label_graph_rotation = default_label_rotation
+            else:
+                label_graph_rotation = float(np.degrees(np.arctan2(top_edge_dir[1], top_edge_dir[0])))
+        if label_graph_rotation is None:
+            label_graph_rotation = default_label_rotation
+
         if label_graph_side == "left":
-            label_x = graph_bbox[0] + label_loc[0] * graph_w
-            label_ha = "right"
-        else:
-            label_x = graph_bbox[2] + label_loc[0] * graph_w
+            label_anchor = top_left + label_loc[0] * bar_width * top_edge_dir + label_loc[1] * bar_height * z_dir
             label_ha = "left"
-        label_y = graph_bbox[1] + 0.5 * graph_h + label_loc[1] * graph_h
+        else:
+            label_anchor = top_right + label_loc[0] * bar_width * top_edge_dir + label_loc[1] * bar_height * z_dir
+            label_ha = "left"
         ax._rotated_scale_label_text = ax.text2D(
-            label_x,
-            label_y,
+            float(label_anchor[0]),
+            float(label_anchor[1]),
             label,
             transform=ax.transAxes,
             rotation=label_graph_rotation,
             rotation_mode="anchor",
             ha=label_ha,
-            va="center",
+            va="bottom",
             fontsize=fontsize,
             color=scale_color,
         )
@@ -1002,7 +1090,7 @@ def _add_rotated_rssi_scale(
         extent=(grad_x0, grad_x0 + grad_w, grad_y0, grad_y0 + grad_h),
         origin="lower",
         aspect="auto",
-        cmap=cmap,
+        cmap=cmap_obj,
         vmin=vmin,
         vmax=vmax,
         transform=rot,
@@ -1070,13 +1158,20 @@ def _add_rotated_rssi_scale(
             pass
         ax._rotated_scale_label_text = None
 
+    if use_auto_model_label_rotation:
+        label_graph_rotation = float(np.degrees(np.arctan2(top_edge_dir[1], top_edge_dir[0])))
+    if label_graph_rotation is None:
+        label_graph_rotation = default_label_rotation
+
     if label_graph_side == "left":
-        label_x, label_ha = graph_bbox[0] + label_loc[0] * graph_w, "left"
+        label_anchor = top_left + label_loc[0] * graph_w * top_edge_dir + label_loc[1] * graph_h * z_dir
+        label_ha = "left"
     else:
-        label_x, label_ha = graph_bbox[2] + label_loc[0] * graph_w, "right"
+        label_anchor = top_right + label_loc[0] * graph_w * top_edge_dir + label_loc[1] * graph_h * z_dir
+        label_ha = "right"
     ax._rotated_scale_label_text = ax.text2D(
-        label_x,
-        graph_bbox[3] + label_loc[1] * graph_h,
+        float(label_anchor[0]),
+        float(label_anchor[1]),
         label,
         transform=ax.transAxes,
         rotation=label_graph_rotation,
@@ -1256,9 +1351,7 @@ def _plot_3d_scatter_panel(
             fontsize=IEEE_FONTSIZE,
             rotation_deg=z_label_rotation,
         )
-    ax.tick_params(axis="x", labelsize=IEEE_FONTSIZE, pad=tick_pads["x"])
-    ax.tick_params(axis="y", labelsize=IEEE_FONTSIZE, pad=tick_pads["y"])
-    ax.tick_params(axis="z", labelsize=IEEE_FONTSIZE, pad=tick_pads["z"])
+    _set_3d_tick_pads(ax, tick_pads)
 
     for axis_name, axis_key in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
         set_ticks = getattr(ax, f"set_{axis_name}ticks")
