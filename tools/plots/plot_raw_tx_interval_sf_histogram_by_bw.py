@@ -16,13 +16,13 @@ from collections import defaultdict
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.cm import ScalarMappable
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
 from plot_config import FIGSIZE_ONE_COL, IEEE_FONTSIZE, SAVE_DPI, save_plot_outputs
+from plot_rssi_vs_multiple import _add_rotated_rssi_scale
 
 
 SF_VALUES = [7, 8, 9, 10, 11, 12]
@@ -180,18 +180,6 @@ def _norm_from_rows(rows, key):
     return mcolors.Normalize(vmin=vmin, vmax=vmax)
 
 
-def _add_top_colorbar(fig, norm, label, cmap_name):
-    sm = ScalarMappable(norm=norm, cmap=cmap_name)
-    sm.set_array([])
-    cax = fig.add_axes([0.20, 0.87, 0.60, 0.040], zorder=20)
-    cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
-    cbar.set_label(label, fontsize=IEEE_FONTSIZE, labelpad=2)
-    cbar.ax.xaxis.set_label_position("top")
-    cbar.ax.xaxis.set_ticks_position("top")
-    cbar.ax.tick_params(labelsize=IEEE_FONTSIZE, pad=1)
-    return cbar
-
-
 def plot_tx_interval_3d_histogram(agg_rows, output_png, color_by="std"):
     if not agg_rows:
         return
@@ -250,8 +238,18 @@ def plot_tx_interval_3d_histogram(agg_rows, output_png, color_by="std"):
         pane.set_edgecolor((0.35, 0.35, 0.35, 0.22))
     ax.grid(True, alpha=0.28)
 
-    _add_top_colorbar(fig, norm, color_label, cmap_name)
-    fig.subplots_adjust(left=0.03, right=0.99, top=0.83, bottom=0.06)
+    _add_rotated_rssi_scale(
+        fig,
+        ax,
+        cmap,
+        float(norm.vmin),
+        float(norm.vmax),
+        label=color_label,
+        fontsize=IEEE_FONTSIZE,
+        scale_graph_side="right",
+        label_graph_side="left",
+    )
+    fig.subplots_adjust(left=0.03, right=0.99, top=0.92, bottom=0.06)
     png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
     print(f"Saved: {png_path}")
@@ -262,8 +260,8 @@ def main():
     parser = argparse.ArgumentParser(description="Plot a 3D TX-interval histogram over SF and BW.")
     parser.add_argument(
         "--data-root",
-        default=os.path.join(WORKSPACE, "dataset"),
-        help="Dataset root (default: curated dataset/).",
+        default=os.path.join(WORKSPACE, "raw_test_data"),
+        help="Dataset root (default: raw_test_data/).",
     )
     parser.add_argument(
         "--output",
