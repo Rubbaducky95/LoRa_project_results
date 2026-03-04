@@ -1635,6 +1635,18 @@ def main():
         scale_graph_side="right",
         label_graph_side="left",
     )
+    plot_rssi_3d_combined(
+        records,
+        os.path.join(args.output_dir, "raw_rssi_3d_combined_stand_left.png"),
+        scale_graph_side="stand",
+        label_graph_side="left",
+    )
+    plot_rssi_3d_combined(
+        records,
+        os.path.join(args.output_dir, "raw_rssi_3d_combined_stand_right.png"),
+        scale_graph_side="stand",
+        label_graph_side="right",
+    )
     plot_rssi_distance_sfbw_surface(agg_records, os.path.join(args.output_dir, "raw_rssi_distance_sfbw_surface.png"))
     plot_rssi_distance_signal_tradeoff_surfaces(
         agg_records,
