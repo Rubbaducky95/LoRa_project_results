@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-WORKSPACE = r"C:\Users\ruben\Documents\LoRa Project"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
 DATA_ROOT = os.path.join(WORKSPACE, "raw_test_data")
 
 BW_VALUES = [62500, 125000, 250000, 500000]

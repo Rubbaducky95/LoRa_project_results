@@ -45,7 +45,8 @@ def gaussian_smooth(y, sigma=5):
     padded = np.pad(y.astype(float), k, mode="edge")
     return np.convolve(padded, kernel, mode="valid")
 
-WORKSPACE = r"C:\Users\ruben\Documents\LoRa_project_results"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
 DATA_ROOT = os.path.join(WORKSPACE, "raw_test_data")
 RESET_CSV = os.path.join(WORKSPACE, "results", "time_reset_locations.csv")
 
