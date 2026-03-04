@@ -6,17 +6,14 @@ import shutil
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
 import numpy as np
-from plot_config import FIGSIZE_TWO_COL, IEEE_FONTSIZE, SAVE_DPI
-from matplotlib.colors import LinearSegmentedColormap
-
-# Greyscale with slight offset on low end: low values = dark grey, high values = black
-GREY_OFFSET_CMAP = LinearSegmentedColormap.from_list(
-    "grey_offset", [(0.9, 0.9, 0.9), (0, 0, 0)]
-)
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+from plot_config import FIGSIZE_ONE_COL, IEEE_FONTSIZE, SAVE_DPI, save_plot_outputs
+from plot_rssi_vs_multiple import _add_centered_horizontal_colorbar, _fmt_bw, _style_3d_axes
 
 
 CFG_RE = re.compile(r"^SF(\d+)_BW(\d+)_TP(\d+)\.csv$")
@@ -333,46 +330,112 @@ def save_mean_map_to_csv(mean_map, csv_path, energy_col="energy_mj"):
     print(f"Saved energy values to {csv_path}")
 
 
-def plot(mean_map, output_png, cmap="gray", ylabel=None):
+def _norm_from_mean_map(mean_map):
+    values = np.asarray(list(mean_map.values()), dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        raise RuntimeError("No usable energy values found in dataset.")
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    if abs(vmax - vmin) < 1e-9:
+        vmax = vmin + 1.0
+    return mcolors.Normalize(vmin=vmin, vmax=vmax)
+
+
+def _matrix_for_tp(mean_map, tp):
+    matrix = np.full((len(BW_VALUES), len(SF_VALUES)), np.nan, dtype=float)
+    for bw_idx, bw in enumerate(BW_VALUES):
+        for sf_idx, sf in enumerate(SF_VALUES):
+            value = mean_map.get((tp, bw, sf))
+            if value is not None:
+                matrix[bw_idx, sf_idx] = float(value)
+    return matrix
+
+
+def imshow3d(ax, array, value_direction="z", pos=0.0, norm=None, cmap=None):
+    """Display a 2D array as a color-coded image embedded in 3D."""
+    if norm is None:
+        norm = mcolors.Normalize()
+    cmap_obj = plt.get_cmap(cmap)
+    data = np.asarray(array, dtype=float)
+    finite = np.isfinite(data)
+    colors = cmap_obj(norm(np.where(finite, data, norm.vmin)))
+    colors[~finite, -1] = 0.0
+
+    if value_direction == "x":
+        nz, ny = data.shape
+        zi, yi = np.mgrid[0 : nz + 1, 0 : ny + 1]
+        xi = np.full_like(yi, float(pos), dtype=float)
+    elif value_direction == "y":
+        nx, nz = data.shape
+        xi, zi = np.mgrid[0 : nx + 1, 0 : nz + 1]
+        yi = np.full_like(zi, float(pos), dtype=float)
+    elif value_direction == "z":
+        ny, nx = data.shape
+        yi, xi = np.mgrid[0 : ny + 1, 0 : nx + 1]
+        zi = np.full_like(xi, float(pos), dtype=float)
+    else:
+        raise ValueError(f"Invalid value_direction: {value_direction!r}")
+
+    ax.plot_surface(
+        xi,
+        yi,
+        zi,
+        rstride=1,
+        cstride=1,
+        facecolors=colors,
+        shade=False,
+        antialiased=False,
+    )
+
+
+def plot(mean_map, output_png, cmap="viridis", ylabel=None, save_pdf=False):
     if ylabel is None:
         ylabel = r"$\bar{E}_{\mathrm{pkt}}$ (mJ)"
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
 
-    # Stackplot: x = BW-TP pairs (sorted by total energy), stacks = SF
-    configs = []
-    for bw in BW_VALUES:
-        for tp in TP_VALUES:
-            sf_vals = []
-            total = 0
-            for sf in SF_VALUES:
-                v = mean_map.get((tp, bw, sf))
-                val = v if v is not None else 0
-                sf_vals.append(val)
-                total += val
-            label = f"{bw/1000:.1f}".rstrip("0").rstrip(".") + "-TP" + str(tp)
-            configs.append((total, label, sf_vals))
-    configs.sort(key=lambda c: c[0])
-    labels = [c[1] for c in configs]
-    sf_arrays = [[c[2][i] for c in configs] for i in range(len(SF_VALUES))]
-    n_configs = len(configs)
-    any_data = any(sf_arrays[i][j] > 0 for i in range(len(SF_VALUES)) for j in range(n_configs))
-    if not any_data:
-        raise RuntimeError("No usable energy values found in dataset.")
+    norm = _norm_from_mean_map(mean_map)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
+    ax = fig.add_subplot(111, projection="3d")
 
-    x = np.arange(n_configs)
-    fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_TWO_COL)
-    colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(SF_VALUES)))
-    ax.stackplot(x, *sf_arrays, labels=[f"SF{s}" for s in SF_VALUES], colors=colors)
-    ax.set_xlabel("Config (BW-TP)", fontsize=IEEE_FONTSIZE)
-    ax.set_ylabel(ylabel, fontsize=IEEE_FONTSIZE)
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.set_xlim(0.0, n_configs-1)
-    ax.legend(loc="upper left", fontsize=IEEE_FONTSIZE, ncol=3)
-    ax.set_ylim(bottom=0)
-    fig.subplots_adjust(left=0.08, right=0.95, top=0.92, bottom=0.22)
-    fig.savefig(output_png, dpi=SAVE_DPI, bbox_inches="tight")
-    print(f"Saved plot: {output_png}")
+    floor_matrix = _matrix_for_tp(mean_map, TP_VALUES[0])
+    left_matrix = _matrix_for_tp(mean_map, TP_VALUES[1]).T
+    back_matrix = _matrix_for_tp(mean_map, TP_VALUES[2]).T
+
+    imshow3d(ax, floor_matrix, value_direction="z", pos=0.0, norm=norm, cmap=cmap)
+    imshow3d(ax, left_matrix, value_direction="x", pos=0.0, norm=norm, cmap=cmap)
+    imshow3d(ax, back_matrix, value_direction="y", pos=float(len(BW_VALUES)), norm=norm, cmap=cmap)
+
+    ax.set_xlabel("SF", labelpad=1.2)
+    ax.set_ylabel("BW (kHz)", labelpad=1.8)
+    ax.set_zlabel("")
+    ax.set_xticks(np.arange(len(SF_VALUES), dtype=float) + 0.5)
+    ax.set_xticklabels([str(sf) for sf in SF_VALUES])
+    ax.set_yticks(np.arange(len(BW_VALUES), dtype=float) + 0.5)
+    ax.set_yticklabels([_fmt_bw(bw / 1000.0) for bw in BW_VALUES])
+    ax.set_zticks([])
+    ax.set_xlim(-0.05, len(SF_VALUES) + 0.35)
+    ax.set_ylim(-0.05, len(BW_VALUES) + 0.20)
+    ax.set_zlim(0.0, float(len(SF_VALUES)))
+    _style_3d_axes(ax, elev=26, azim=-58, box_aspect=(1.0, 0.72, 0.88))
+
+    ax.text(0.06, 3.55, 5.55, f"TP {TP_VALUES[1]}\nz=SF", fontsize=IEEE_FONTSIZE - 1, ha="left", va="bottom")
+    ax.text(4.05, float(len(BW_VALUES)) + 0.02, 3.05, f"TP {TP_VALUES[2]}\nz=BW", fontsize=IEEE_FONTSIZE - 1, ha="left", va="bottom")
+    ax.text2D(0.59, 0.14, f"TP {TP_VALUES[0]}", transform=ax.transAxes, fontsize=IEEE_FONTSIZE - 1, ha="left", va="bottom")
+
+    _add_centered_horizontal_colorbar(
+        fig,
+        norm,
+        ylabel,
+        cmap=cmap,
+        rect=(0.20, 0.88, 0.60, 0.028),
+    )
+    fig.subplots_adjust(left=0.03, right=0.97, top=0.83, bottom=0.08)
+    png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight", save_pdf=save_pdf)
+    plt.close(fig)
+    print(f"Saved: {png_path}")
+    if pdf_path:
+        print(f"Saved: {pdf_path}")
 
 
 def main():
@@ -387,7 +450,7 @@ def main():
     parser.add_argument(
         "--output",
         default=None,
-        help="Output PNG base path (default: energy_bw_vs_sf_with_tp/raw_energy_minmax_gradient_by_tp).",
+        help="Output PNG path (default: energy_bw_vs_sf_with_tp/*_energy_tp_faces_3d.png).",
     )
     parser.add_argument(
         "--recompute",
@@ -400,11 +463,16 @@ def main():
         default="per-packet",
         help="per-packet: avg energy per packet (mJ); wh: total energy usage (Wh).",
     )
+    parser.add_argument(
+        "--save-pdf",
+        action="store_true",
+        help="Also save a PDF sidecar for final figure versions.",
+    )
     args = parser.parse_args()
     if args.output is None:
         out_dir = "dataset_plots" if "dataset" in args.data_root else "raw_test_data_plots"
         subdir = "energy_bw_vs_sf_with_tp"
-        base_name = "dataset_energy_minmax_gradient_by_tp" if "dataset" in args.data_root else "raw_energy_minmax_gradient_by_tp"
+        base_name = "dataset_energy_tp_faces_3d" if "dataset" in args.data_root else "raw_energy_tp_faces_3d"
         suffix = "_wh" if args.mode == "wh" else "_v3"
         args.output = os.path.join(WORKSPACE, "results", out_dir, subdir, f"{base_name}{suffix}.png")
 
@@ -429,7 +497,7 @@ def main():
         if mean_map is None:
             mean_map = collect_fn(args.data_root)
             save_mean_map_to_csv(mean_map, csv_path, energy_col=energy_col)
-    plot(mean_map, f"{base}.png", cmap="viridis_r", ylabel=ylabel)
+    plot(mean_map, f"{base}.png", cmap="viridis", ylabel=ylabel, save_pdf=args.save_pdf)
 
 
 if __name__ == "__main__":

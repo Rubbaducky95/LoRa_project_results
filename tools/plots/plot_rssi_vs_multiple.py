@@ -754,15 +754,24 @@ def _add_rotated_rssi_scale(
     tick_len=None,
     tick_gap=None,
     tick_text_shift=None,
+    stand_values_side=None,
+    reverse_scale=False,
 ):
     """Add a compact rotated RSSI scale anchored to a graph-side corner."""
     if fontsize is None:
         fontsize = IEEE_FONTSIZE
-    if scale_graph_side not in ("left", "right"):
+    if scale_graph_side not in ("left", "right", "stand"):
         raise ValueError(f"Unsupported scale graph side: {scale_graph_side}")
+    if stand_values_side is not None and stand_values_side not in ("left", "right"):
+        raise ValueError(f"Unsupported stand values side: {stand_values_side}")
 
     if label_graph_side is None:
-        label_graph_side = "right" if scale_graph_side == "left" else "left"
+        if scale_graph_side == "left":
+            label_graph_side = "right"
+        elif scale_graph_side == "right":
+            label_graph_side = "left"
+        else:
+            label_graph_side = "right"
     if label_graph_side not in ("left", "right"):
         raise ValueError(f"Unsupported label graph side: {label_graph_side}")
     loc_scale_xy = _resolve_xy_scale(loc_scale, "loc_scale")
@@ -777,7 +786,7 @@ def _add_rotated_rssi_scale(
         default_tick_gap = 0.20
         default_tick_text_shift = (-0.15, -0.15)
         default_tick_text_ha = "left"
-    else:
+    elif scale_graph_side == "right":
         default_size = (0.525, 0.2)
         default_loc = (-0.0, 0.12)
         default_angle_deg = 151
@@ -786,8 +795,24 @@ def _add_rotated_rssi_scale(
         default_tick_gap = 0.20
         default_tick_text_shift = (0.05, -0.2)
         default_tick_text_ha = "right"
+    else:
+        # Tune the stand scale directly here; TX plots no longer override these defaults.
+        default_size = (0.2, 0.75)
+        default_loc = (0.0, 0.0)
+        default_angle_deg = 0.0
+        tick_sign = 0
+        default_tick_len = 0.08
+        default_tick_gap = 0.06
+        default_tick_text_shift = (0.0, 0.0)
+        default_tick_text_ha = "left"
 
-    if scale_graph_side == "left" and label_graph_side == "left":
+    if scale_graph_side == "stand" and label_graph_side == "left":
+        default_label_loc = (0.435, 0.60)
+        default_label_rotation = 30.0
+    elif scale_graph_side == "stand" and label_graph_side == "right":
+        default_label_loc = (0.03, 0.0)
+        default_label_rotation = 90.0
+    elif scale_graph_side == "left" and label_graph_side == "left":
         default_label_loc = (-0.05, -0.125)
         default_label_rotation = 35.0
     elif scale_graph_side == "left" and label_graph_side == "right":
@@ -833,8 +858,13 @@ def _add_rotated_rssi_scale(
     loc_offset = (loc[0] * graph_w, loc[1] * graph_h)
     if scale_graph_side == "left":
         base_loc = (graph_bbox[0], graph_bbox[3] - size_axes[1])
-    else:
+    elif scale_graph_side == "right":
         base_loc = (graph_bbox[2] - size_axes[0], graph_bbox[3] - size_axes[1])
+    else:
+        base_loc = (
+            graph_bbox[0] - size_axes[0] - 0.015 * graph_w,
+            graph_bbox[1] + 0.5 * (graph_h - size_axes[1]),
+        )
     loc = (base_loc[0] + loc_offset[0], base_loc[1] + loc_offset[1])
     scale_ax = fig.add_axes(
         [
@@ -849,12 +879,122 @@ def _add_rotated_rssi_scale(
     scale_ax.set_ylim(0, 1)
     scale_ax.axis("off")
 
+    scale_color = DEBUG_3D_TEXT_COLOR if DEBUG_DARK_3D_BACKGROUND else "black"
+    if scale_graph_side == "stand":
+        if stand_values_side is None:
+            stand_values_side = "left" if label_graph_side == "right" else "right"
+        grad_x0, grad_y0 = 0.42, 0.02
+        grad_w, grad_h = 0.16, 0.96
+        cx = grad_x0 + 0.5 * grad_w
+        cy = grad_y0 + 0.5 * grad_h
+        rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, final_angle_deg) + scale_ax.transAxes
+        if reverse_scale:
+            gradient = np.linspace(vmax, vmin, 256).reshape(-1, 1)
+        else:
+            gradient = np.linspace(vmin, vmax, 256).reshape(-1, 1)
+        scale_ax.imshow(
+            gradient,
+            extent=(grad_x0, grad_x0 + grad_w, grad_y0, grad_y0 + grad_h),
+            origin="lower",
+            aspect="auto",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="bilinear",
+            transform=rot,
+            clip_on=False,
+            zorder=2,
+        )
+        scale_ax.add_patch(
+            Rectangle(
+                (grad_x0, grad_y0),
+                grad_w,
+                grad_h,
+                fill=False,
+                edgecolor=scale_color,
+                linewidth=0.8,
+                transform=rot,
+                clip_on=False,
+                zorder=3,
+            )
+        )
+
+        for tick in _nice_rssi_ticks(vmin, vmax):
+            if vmax == vmin:
+                frac = 0.5
+            elif reverse_scale:
+                frac = 1.0 - (tick - vmin) / (vmax - vmin)
+            else:
+                frac = (tick - vmin) / (vmax - vmin)
+            y_tick = grad_y0 + frac * grad_h
+            if stand_values_side == "left":
+                tick_x0 = grad_x0
+                tick_x1 = tick_x0 - tick_len
+                tick_text_x = tick_x1 - tick_gap + tick_text_shift[0]
+                tick_text_ha = "right"
+            else:
+                tick_x0 = grad_x0 + grad_w
+                tick_x1 = tick_x0 + tick_len
+                tick_text_x = tick_x1 + tick_gap + tick_text_shift[0]
+                tick_text_ha = "left"
+            tick_text_y = y_tick + tick_text_shift[1]
+            scale_ax.plot(
+                [tick_x0, tick_x1],
+                [y_tick, y_tick],
+                color=scale_color,
+                linewidth=0.8,
+                transform=rot,
+                clip_on=False,
+                zorder=4,
+            )
+            tick_text = f"{tick:.0f}" if abs(tick - round(tick)) < 1e-6 else f"{tick:.1f}"
+            scale_ax.text(
+                tick_text_x,
+                tick_text_y,
+                tick_text,
+                transform=rot,
+                ha=tick_text_ha,
+                va="center",
+                fontsize=fontsize,
+                color=scale_color,
+                clip_on=False,
+                zorder=5,
+            )
+
+        existing_label = getattr(ax, "_rotated_scale_label_text", None)
+        if existing_label is not None:
+            try:
+                existing_label.remove()
+            except Exception:
+                pass
+            ax._rotated_scale_label_text = None
+
+        if label_graph_side == "left":
+            label_x = graph_bbox[0] + label_loc[0] * graph_w
+            label_ha = "right"
+        else:
+            label_x = graph_bbox[2] + label_loc[0] * graph_w
+            label_ha = "left"
+        label_y = graph_bbox[1] + 0.5 * graph_h + label_loc[1] * graph_h
+        ax._rotated_scale_label_text = ax.text2D(
+            label_x,
+            label_y,
+            label,
+            transform=ax.transAxes,
+            rotation=label_graph_rotation,
+            rotation_mode="anchor",
+            ha=label_ha,
+            va="center",
+            fontsize=fontsize,
+            color=scale_color,
+        )
+        return scale_ax
+
     grad_x0, grad_y0 = -0.0, 0.0
     grad_w, grad_h = 1.35, 0.10
     cx = grad_x0 + 0.4 * grad_w
     cy = grad_y0 + 0.8 * grad_h
     rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, final_angle_deg) + scale_ax.transAxes
-    scale_color = DEBUG_3D_TEXT_COLOR if DEBUG_DARK_3D_BACKGROUND else "black"
 
     gradient = np.linspace(vmin, vmax, 256).reshape(1, -1)
     scale_ax.imshow(
