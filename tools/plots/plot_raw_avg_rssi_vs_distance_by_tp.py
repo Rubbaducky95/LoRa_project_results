@@ -9,6 +9,8 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
 DIST_RE = re.compile(r"^distance_([\d.]+)m?$")
 CFG_RE = re.compile(r"^SF(\d+)_BW(\d+)_TP(\d+)\.csv$")
 # X-axis ticks: start at 6.25, then every 25 m
@@ -127,7 +129,7 @@ def main():
     )
     parser.add_argument(
         "--data-root",
-        default=r"C:\Users\ruben\Documents\LoRa Project\raw_test_data",
+        default=os.path.join(WORKSPACE, "raw_test_data"),
         help="Dataset root (distance_* folders).",
     )
     parser.add_argument(
@@ -146,7 +148,7 @@ def main():
         out_dir = "dataset_plots" if "dataset" in args.data_root else "raw_test_data_plots"
         base = "dataset" if "dataset" in args.data_root else "raw"
         fname = f"{base}_avg_rssi_vs_distance_all_tp.png" if args.single_plot else f"{base}_avg_rssi_vs_distance_by_tp.png"
-        args.output = os.path.join(r"C:\Users\ruben\Documents\LoRa Project", "results", out_dir, fname)
+        args.output = os.path.join(WORKSPACE, "results", out_dir, fname)
 
     tp_values = [int(x.strip()) for x in args.tp_values.split(",") if x.strip()]
     setup_plot_style()
