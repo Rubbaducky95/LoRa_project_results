@@ -114,6 +114,8 @@ Pattern: `SF<#>_BW<#>_TP<#>.csv` (e.g. `SF7_BW62500_TP12.csv`)
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | `results/raw_test_data_plots/config_change_T_init.csv` | Config switch times for energy vs time plots. Columns: `packet_index`, `config` (SF,BW as "7, 62.5"), `TP`, `T_init_s` |
 | `airtime_by_sf_bw_payload.csv`                         | LoRa airtime (ms) by SF, BW, payload size                                                                              |
+| `results/raw_test_data_plots/operating_space_3d/raw_distance_goodput_energy_frontier.csv` | Per-distance goodput/energy frontier points for the 3D operating-envelope plot                  |
+| `results/dataset_plots/operating_space_3d/dataset_distance_goodput_energy_frontier.csv`   | Per-distance goodput/energy frontier points for the curated-dataset operating-envelope plot     |
 | `results/qa/dataset_outlier_summary.json`              | Outlier detection summary                                                                                              |
 | `results/qa/dataset_outlier_report.csv`                | Per-file outlier details                                                                                               |
 
@@ -136,6 +138,7 @@ Pattern: `SF<#>_BW<#>_TP<#>.csv` (e.g. `SF7_BW62500_TP12.csv`)
 | `plot_energy_minmax_gradient_by_tp.py` | Energy heatmaps across TP, BW, and SF                                                           |
 | `plot_battery_lifetime_throughput.py` | Battery lifetime and throughput vs energy-per-bit                                                |
 | `plot_rssi_vs_multiple.py`            | Combined 3D RSSI figures and RSSI tradeoff plots                                                 |
+| `plot_operating_pareto_3d.py`         | 3D operating-envelope plot of distance, goodput, and energy/bit, colored by RSSI                |
 | `plot_time_since_boot.py`             | Time since boot / transmission init                                                              |
 
 
@@ -207,4 +210,17 @@ Scripts in `tools/plots/` (e.g. plot_per_vs_multiple_configs.py):
 3. `pip install matplotlib numpy`
 4. Run plots: `python tools/plots/plot_per_gradient_energy_vs_time.py`
 5. Outputs in `results/raw_test_data_plots/`
+
+---
+
+## 12. Operating Envelope Plot (plot_operating_pareto_3d.py)
+
+- Default raw-data outputs:
+  - `results/raw_test_data_plots/operating_space_3d/raw_distance_goodput_energy_3d.png`
+  - `results/raw_test_data_plots/operating_space_3d/raw_distance_goodput_energy_3d.pdf`
+  - `results/raw_test_data_plots/operating_space_3d/raw_distance_goodput_energy_frontier.csv`
+- Default curated-dataset outputs:
+  - `results/dataset_plots/operating_space_3d/dataset_distance_goodput_energy_3d.png`
+  - `results/dataset_plots/operating_space_3d/dataset_distance_goodput_energy_3d.pdf`
+  - `results/dataset_plots/operating_space_3d/dataset_distance_goodput_energy_frontier.csv`
 
