@@ -15,7 +15,7 @@ import numpy as np
 from matplotlib.cm import ScalarMappable
 from matplotlib import transforms as mtransforms
 from matplotlib.patches import Rectangle
-from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d import Axes3D, proj3d
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
@@ -29,6 +29,13 @@ TP_VALUES = [2, 12, 22]
 BW_VALUES = [62500, 125000, 250000, 500000]
 STANDARD_DISTANCE_TICKS = np.array([25.0, 50.0, 75.0, 100.0], dtype=float)
 
+DEBUG_DARK_3D_BACKGROUND = False
+DEBUG_3D_FIG_COLOR = "#171b22"
+DEBUG_3D_AXES_COLOR = "#222833"
+DEBUG_3D_TEXT_COLOR = "#f2f5f9"
+DEBUG_3D_EDGE_RGBA = (0.92, 0.95, 0.99, 0.95)
+DEBUG_3D_GRID_RGBA = (0.92, 0.95, 0.99, 0.18)
+DEBUG_3D_PANE_RGBA = (0.24, 0.28, 0.35, 0.78)
 
 def setup_plot_style():
     latex_ok = shutil.which("latex") is not None
@@ -282,6 +289,52 @@ def _style_3d_axes(ax, elev=27, azim=-61, box_aspect=(1.55, 1.0, 0.82)):
         pane.set_alpha(0.10)
         pane.set_edgecolor((0.35, 0.35, 0.35, 0.25))
     ax.grid(True, alpha=0.35)
+    _apply_dark_3d_debug_theme(ax)
+
+
+def _apply_dark_3d_debug_theme(ax):
+    """Temporary high-contrast theme to make 3D cube edges easier to align."""
+    if not DEBUG_DARK_3D_BACKGROUND:
+        return
+
+    fig = ax.figure
+    fig.patch.set_facecolor(DEBUG_3D_FIG_COLOR)
+    ax.set_facecolor(DEBUG_3D_AXES_COLOR)
+
+    for pane in (ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane):
+        pane.set_facecolor(DEBUG_3D_PANE_RGBA)
+        pane.set_edgecolor(DEBUG_3D_EDGE_RGBA)
+
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        try:
+            axis._axinfo["grid"]["color"] = DEBUG_3D_GRID_RGBA
+            axis._axinfo["axisline"]["color"] = DEBUG_3D_EDGE_RGBA
+            axis._axinfo["tick"]["color"] = DEBUG_3D_EDGE_RGBA
+        except Exception:
+            pass
+
+    ax.tick_params(axis="x", colors=DEBUG_3D_TEXT_COLOR)
+    ax.tick_params(axis="y", colors=DEBUG_3D_TEXT_COLOR)
+    ax.tick_params(axis="z", colors=DEBUG_3D_TEXT_COLOR)
+    ax.xaxis.label.set_color(DEBUG_3D_TEXT_COLOR)
+    ax.yaxis.label.set_color(DEBUG_3D_TEXT_COLOR)
+    ax.zaxis.label.set_color(DEBUG_3D_TEXT_COLOR)
+
+    custom_zlabel = getattr(ax, "_custom_zlabel_text", None)
+    if custom_zlabel is not None:
+        text_items = custom_zlabel if isinstance(custom_zlabel, (list, tuple)) else [custom_zlabel]
+        for item in text_items:
+            try:
+                item.set_color(DEBUG_3D_TEXT_COLOR)
+            except Exception:
+                pass
+
+    rotated_scale_label = getattr(ax, "_rotated_scale_label_text", None)
+    if rotated_scale_label is not None:
+        try:
+            rotated_scale_label.set_color(DEBUG_3D_TEXT_COLOR)
+        except Exception:
+            pass
 
 
 def _norm_from_matrix(mat):
@@ -432,7 +485,7 @@ def plot_rssi_distance_sfbw_surface(agg_records, output_png):
     color_norm = _norm_from_matrix(color_mat)
     color_label = r"Energy/bit ($\mu$J)" if not np.all(np.isnan(energy_bit_mat)) else r"RSSI (dBm)"
     color_cmap = "cividis" if not np.all(np.isnan(energy_bit_mat)) else "viridis"
-    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
     ax = fig.add_subplot(111, projection="3d")
     _plot_rssi_colored_surface(
         ax,
@@ -480,7 +533,7 @@ def plot_rssi_distance_signal_tradeoff_surfaces(agg_records, output_png):
         return
 
     rssi_norm = _norm_from_matrix(rssi_mat)
-    fig = plt.figure(figsize=FIGSIZE_IEEE_DOUBLE)
+    fig = plt.figure(figsize=FIGSIZE_ONE_COL)
     ax = fig.add_subplot(111, projection="3d")
     _plot_rssi_colored_surface(
         ax,
@@ -498,7 +551,7 @@ def plot_rssi_distance_signal_tradeoff_surfaces(agg_records, output_png):
         view_elev=28,
         view_azim=-60,
         box_aspect=(1.35, 0.92, 0.92),
-        z_label_coords=(1.0, 0.84),
+        z_label_coords=(1.02, 0.84),
     )
     _add_rotated_rssi_scale(
         fig,
@@ -508,11 +561,8 @@ def plot_rssi_distance_signal_tradeoff_surfaces(agg_records, output_png):
         float(rssi_norm.vmax),
         label=r"RSSI (dBm)",
         fontsize=IEEE_FONTSIZE,
-        loc=(0.02, 0.72),
-        tick_side="outside",
-        label_side="tick_side",
-        scale_graph_side="left",
-        label_graph_side="right",
+        scale_graph_side="right",
+        label_graph_side="left",
     )
     fig.subplots_adjust(left=0.03, right=0.99, top=0.92, bottom=0.05)
     png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
@@ -595,6 +645,94 @@ def _nice_rssi_ticks(vmin, vmax):
     return [lo, 0.5 * (lo + hi), hi]
 
 
+def _project_3d_graph_bbox_axes(fig, ax):
+    """Estimate the visible 3D cube bounds in axes coordinates."""
+    try:
+        fig.canvas.draw()
+    except Exception:
+        pass
+
+    try:
+        x_vals = ax.get_xlim3d()
+        y_vals = ax.get_ylim3d()
+        z_vals = ax.get_zlim3d()
+    except Exception:
+        return (0.0, 0.0, 1.0, 1.0)
+
+    corners = [
+        (x, y, z)
+        for x in x_vals
+        for y in y_vals
+        for z in z_vals
+    ]
+    points_axes = []
+    proj = ax.get_proj()
+    for x_val, y_val, z_val in corners:
+        try:
+            x_proj, y_proj, _ = proj3d.proj_transform(x_val, y_val, z_val, proj)
+            x_disp, y_disp = ax.transData.transform((x_proj, y_proj))
+            x_axes, y_axes = ax.transAxes.inverted().transform((x_disp, y_disp))
+        except Exception:
+            continue
+        if np.isfinite(x_axes) and np.isfinite(y_axes):
+            points_axes.append((float(x_axes), float(y_axes)))
+
+    if not points_axes:
+        return (0.0, 0.0, 1.0, 1.0)
+
+    points_axes = np.asarray(points_axes, dtype=float)
+    return (
+        float(np.min(points_axes[:, 0])),
+        float(np.min(points_axes[:, 1])),
+        float(np.max(points_axes[:, 0])),
+        float(np.max(points_axes[:, 1])),
+    )
+
+
+def _resolve_xy_scale(scale, name):
+    """Normalize a scalar or `(x, y)` scale into a float pair."""
+    if np.isscalar(scale):
+        value = float(scale)
+        return (value, value)
+    try:
+        scale_x, scale_y = scale
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number or a 2-tuple") from None
+    return (float(scale_x), float(scale_y))
+
+
+def _resolve_scale_size(size, graph_w, graph_h, ax, fig):
+    """Resolve `(w, h)` and infer one dimension from the drawn graph aspect."""
+    if size is None:
+        return None
+    try:
+        size_w, size_h = size
+    except (TypeError, ValueError):
+        raise ValueError("size must be a 2-tuple") from None
+
+    try:
+        fig.canvas.draw()
+    except Exception:
+        pass
+
+    ax_bbox = ax.get_window_extent()
+    width_basis = max(graph_w * float(ax_bbox.width), 1e-9)
+    height_basis = max(graph_h * float(ax_bbox.height), 1e-9)
+
+    if size_w is None and size_h is None:
+        raise ValueError("size cannot have both width and height set to None")
+    if size_w is None:
+        size_h = float(size_h)
+        size_w = size_h * height_basis / width_basis
+    elif size_h is None:
+        size_w = float(size_w)
+        size_h = size_w * width_basis / height_basis
+    else:
+        size_w = float(size_w)
+        size_h = float(size_h)
+    return (size_w, size_h)
+
+
 def _add_rotated_rssi_scale(
     fig,
     ax,
@@ -602,159 +740,108 @@ def _add_rotated_rssi_scale(
     vmin,
     vmax,
     label,
+    *,
+    scale_graph_side="left",
+    label_graph_side=None,
     angle_deg=None,
     loc=None,
+    label_loc=None,
     size=None,
+    size_scale=1.0,
+    loc_scale=1.0,
     fontsize=None,
-    text_angle_deg=None,
-    tick_side="inside",
-    label_side="tick_side",
-    scale_graph_side=None,
-    label_graph_side=None,
-    graph_side_pad=(0.02, 0.03),
-    label_graph_pad=None,
     label_graph_rotation=None,
-    tick_len=0.03,
+    tick_len=None,
     tick_gap=None,
-    label_gap=None,
+    tick_text_shift=None,
 ):
-    """Add a compact rotated gradient scale with side-aware ticks and label.
-
-    `tick_side` and `label_side` may be:
-    - `inside`: side facing the parent axes center
-    - `outside`: side facing away from the parent axes center
-    - `positive`: local +normal side of the unrotated bar
-    - `negative`: local -normal side of the unrotated bar
-    - `tick_side`: for `label_side` only, use the same side as ticks
-    - `opposite`: opposite of `tick_side`
-
-    `scale_graph_side` and `label_graph_side` may be:
-    - `left`: upper-left of the parent 3D axes
-    - `right`: upper-right of the parent 3D axes
-
-    If `scale_graph_side` is set, `loc` becomes an `(x, y)` offset from that
-    anchored corner instead of an absolute axes-relative position.
-    """
+    """Add a compact rotated RSSI scale anchored to a graph-side corner."""
     if fontsize is None:
         fontsize = IEEE_FONTSIZE
-    if size is None:
-        if scale_graph_side in ("left", "right"):
-            size = (0.5, 0.25)
-        else:
-            size = (0.34, 0.23)
-    if angle_deg is None:
-        if scale_graph_side == "left":
-            angle_deg = 235.0
-        elif scale_graph_side == "right":
-            angle_deg = -27.5
-        else:
-            angle_deg = 45.0
-    if text_angle_deg is None:
-        text_angle_deg = angle_deg
-    if label_graph_pad is None:
-        if (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "left"
-            and label_graph_side == "left"
-        ):
-            label_graph_pad = (-0.05, 0.125)
-        elif (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "left"
-            and label_graph_side == "right"
-        ):
-            label_graph_pad = (0.2, 0.1)
-        elif (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "right"
-            and label_graph_side == "left"
-        ):
-            label_graph_pad = (0.05, 0.225)
-        elif (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "right"
-            and label_graph_side == "right"
-        ):
-            label_graph_pad = (0.05, 0.0)
-        else:
-            label_graph_pad = (0.03, 0.03)
-    if tick_gap is None:
-        if (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "right"
-            and label_graph_side in ("left", "right")
-        ):
-            tick_gap = 0.05
-        elif scale_graph_side == "left":
-            tick_gap = 0.2
-        else:
-            tick_gap = 0.2
-    if label_gap is None:
-        if (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "right"
-            and label_graph_side == "left"
-        ):
-            label_gap = 0.1
-        elif (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "left"
-            and label_graph_side == "right"
-        ):
-            label_gap = 0.1
-        else:
-            label_gap = 0.25
-    if label_graph_rotation is None:
-        if (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "left"
-            and label_graph_side == "left"
-        ):
-            label_graph_rotation = 35.0
-        elif (
-            tick_side == "outside"
-            and label_side == "tick_side"
-            and scale_graph_side == "left"
-            and label_graph_side == "right"
-        ):
-            label_graph_rotation = -15.0
-        elif label_graph_side == "left":
-            label_graph_rotation = 35.0
-        elif label_graph_side == "right":
-            label_graph_rotation = -15.0
-        else:
-            label_graph_rotation = 0.0
+    if scale_graph_side not in ("left", "right"):
+        raise ValueError(f"Unsupported scale graph side: {scale_graph_side}")
+
+    if label_graph_side is None:
+        label_graph_side = "right" if scale_graph_side == "left" else "left"
+    if label_graph_side not in ("left", "right"):
+        raise ValueError(f"Unsupported label graph side: {label_graph_side}")
+    loc_scale_xy = _resolve_xy_scale(loc_scale, "loc_scale")
+    size_scale_xy = _resolve_xy_scale(size_scale, "size_scale")
+
+    if scale_graph_side == "left":
+        default_size = (0.525, 0.2)
+        default_loc = (-0.075, 0.1)
+        default_angle_deg = 240
+        tick_sign = -1
+        default_tick_len = 0.03
+        default_tick_gap = 0.20
+        default_tick_text_shift = (-0.15, -0.15)
+        default_tick_text_ha = "left"
+    else:
+        default_size = (0.525, 0.2)
+        default_loc = (-0.0, 0.12)
+        default_angle_deg = 151
+        tick_sign = -1
+        default_tick_len = 0.03
+        default_tick_gap = 0.20
+        default_tick_text_shift = (0.05, -0.2)
+        default_tick_text_ha = "right"
+
+    if scale_graph_side == "left" and label_graph_side == "left":
+        default_label_loc = (-0.05, -0.125)
+        default_label_rotation = 35.0
+    elif scale_graph_side == "left" and label_graph_side == "right":
+        default_label_loc = (-0.20, 0.0025)
+        default_label_rotation = -12.5
+    elif scale_graph_side == "right" and label_graph_side == "left":
+        default_label_loc = (-0.0, -0.15)
+        default_label_rotation = 35.0
+    else:
+        default_label_loc = (-0.05, 0.0)
+        default_label_rotation = -15.0
+
     if loc is None:
-        if scale_graph_side == "left":
-            loc = (-0.05, 0.04)
-        elif scale_graph_side == "right":
-            loc = (-0.1, 0.1)
-        else:
-            loc = (0.02, 0.72)
-    if scale_graph_side is not None:
-        pad_x, pad_y = graph_side_pad
-        if scale_graph_side == "left":
-            base_loc = (pad_x, 1.0 - size[1] - pad_y)
-        elif scale_graph_side == "right":
-            base_loc = (1.0 - size[0] - pad_x, 1.0 - size[1] - pad_y)
-        else:
-            raise ValueError(f"Unsupported scale graph side: {scale_graph_side}")
-        loc = (base_loc[0] + loc[0], base_loc[1] + loc[1])
+        loc = default_loc
+    else:
+        loc = (float(loc[0]), float(loc[1]))
+    if label_loc is None:
+        label_loc = default_label_loc
+    else:
+        label_loc = (float(label_loc[0]), float(label_loc[1]))
+    final_angle_deg = default_angle_deg if angle_deg is None else float(angle_deg)
+    if label_graph_rotation is None:
+        label_graph_rotation = default_label_rotation
+    if tick_len is None:
+        tick_len = default_tick_len
+    if tick_gap is None:
+        tick_gap = default_tick_gap
+    if tick_text_shift is None:
+        tick_text_shift = default_tick_text_shift
+    else:
+        tick_text_shift = (float(tick_text_shift[0]), float(tick_text_shift[1]))
+
+    graph_bbox = _project_3d_graph_bbox_axes(fig, ax)
     ax_pos = ax.get_position()
+    graph_w = max(graph_bbox[2] - graph_bbox[0], 1e-6)
+    graph_h = max(graph_bbox[3] - graph_bbox[1], 1e-6)
+    if size is None:
+        size = default_size
+    size = _resolve_scale_size(size, graph_w, graph_h, ax, fig)
+    size = (size[0] * size_scale_xy[0], size[1] * size_scale_xy[1])
+    loc = (loc[0] * loc_scale_xy[0], loc[1] * loc_scale_xy[1])
+    size_axes = (size[0] * graph_w, size[1] * graph_h)
+    loc_offset = (loc[0] * graph_w, loc[1] * graph_h)
+    if scale_graph_side == "left":
+        base_loc = (graph_bbox[0], graph_bbox[3] - size_axes[1])
+    else:
+        base_loc = (graph_bbox[2] - size_axes[0], graph_bbox[3] - size_axes[1])
+    loc = (base_loc[0] + loc_offset[0], base_loc[1] + loc_offset[1])
     scale_ax = fig.add_axes(
         [
             ax_pos.x0 + loc[0] * ax_pos.width,
             ax_pos.y0 + loc[1] * ax_pos.height,
-            size[0] * ax_pos.width,
-            size[1] * ax_pos.height,
+            size_axes[0] * ax_pos.width,
+            size_axes[1] * ax_pos.height,
         ],
         zorder=20,
     )
@@ -762,48 +849,12 @@ def _add_rotated_rssi_scale(
     scale_ax.set_ylim(0, 1)
     scale_ax.axis("off")
 
-    grad_x0, grad_y0 = 0.08, 0.18
-    grad_w, grad_h = 1.2, 0.12
-    label_gap_opposite = 0.05
+    grad_x0, grad_y0 = -0.0, 0.0
+    grad_w, grad_h = 1.35, 0.10
     cx = grad_x0 + 0.4 * grad_w
     cy = grad_y0 + 0.8 * grad_h
-    rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, angle_deg) + scale_ax.transAxes
-
-    def _resolve_inside_sign():
-        ax_pos = ax.get_position()
-        ax_center_disp = fig.transFigure.transform(
-            (ax_pos.x0 + 0.5 * ax_pos.width, ax_pos.y0 + 0.5 * ax_pos.height)
-        )
-        probe_offset = max(grad_h + tick_len + tick_gap, 0.22)
-        bar_center_x = grad_x0 + 0.5 * grad_w
-        pos_probe = np.asarray(rot.transform((bar_center_x, grad_y0 + grad_h + probe_offset)))
-        neg_probe = np.asarray(rot.transform((bar_center_x, grad_y0 - probe_offset)))
-        pos_dist = np.linalg.norm(pos_probe - ax_center_disp)
-        neg_dist = np.linalg.norm(neg_probe - ax_center_disp)
-        return 1 if pos_dist <= neg_dist else -1
-
-    def _resolve_side_sign(side_name, inside_sign, ref_sign=None):
-        if side_name == "inside":
-            return inside_sign
-        if side_name == "outside":
-            return -inside_sign
-        if side_name in ("positive", "+"):
-            return 1
-        if side_name in ("negative", "-"):
-            return -1
-        if side_name == "tick_side":
-            if ref_sign is None:
-                raise ValueError("`tick_side` reference requested before tick side is resolved")
-            return ref_sign
-        if side_name == "opposite":
-            if ref_sign is None:
-                raise ValueError("`opposite` requested before tick side is resolved")
-            return -ref_sign
-        raise ValueError(f"Unsupported rotated scale side: {side_name}")
-
-    inside_sign = _resolve_inside_sign()
-    tick_sign = _resolve_side_sign(tick_side, inside_sign)
-    label_sign = _resolve_side_sign(label_side, inside_sign, ref_sign=tick_sign)
+    rot = mtransforms.Affine2D().rotate_deg_around(cx, cy, final_angle_deg) + scale_ax.transAxes
+    scale_color = DEBUG_3D_TEXT_COLOR if DEBUG_DARK_3D_BACKGROUND else "black"
 
     gradient = np.linspace(vmin, vmax, 256).reshape(1, -1)
     scale_ax.imshow(
@@ -825,7 +876,7 @@ def _add_rotated_rssi_scale(
             grad_w,
             grad_h,
             fill=False,
-            edgecolor="black",
+            edgecolor=scale_color,
             linewidth=0.8,
             transform=rot,
             clip_on=False,
@@ -846,10 +897,12 @@ def _add_rotated_rssi_scale(
             tick_y1 = grad_y0 - tick_len
             tick_text_y = tick_y1 - tick_gap
             tick_text_va = "top"
+        tick_text_x = x_tick + tick_text_shift[0]
+        tick_text_y += tick_text_shift[1]
         scale_ax.plot(
             [x_tick, x_tick],
             [tick_y0, tick_y1],
-            color="black",
+            color=scale_color,
             linewidth=0.8,
             transform=rot,
             clip_on=False,
@@ -857,13 +910,14 @@ def _add_rotated_rssi_scale(
         )
         tick_text = f"{tick:.0f}" if abs(tick - round(tick)) < 1e-6 else f"{tick:.1f}"
         scale_ax.text(
-            x_tick,
+            tick_text_x,
             tick_text_y,
             tick_text,
             transform=rot,
-            ha="center",
+            ha=default_tick_text_ha,
             va=tick_text_va,
             fontsize=fontsize,
+            color=scale_color,
             clip_on=False,
             zorder=5,
         )
@@ -876,48 +930,22 @@ def _add_rotated_rssi_scale(
             pass
         ax._rotated_scale_label_text = None
 
-    if label_graph_side is not None:
-        pad_x, pad_y = label_graph_pad
-        if label_graph_side == "left":
-            label_x, label_ha = pad_x, "left"
-        elif label_graph_side == "right":
-            label_x, label_ha = 1.0 - pad_x, "right"
-        else:
-            raise ValueError(f"Unsupported label graph side: {label_graph_side}")
-        ax._rotated_scale_label_text = ax.text2D(
-            label_x,
-            1.0 - pad_y,
-            label,
-            transform=ax.transAxes,
-            rotation=label_graph_rotation,
-            rotation_mode="anchor",
-            ha=label_ha,
-            va="top",
-            fontsize=fontsize,
-        )
+    if label_graph_side == "left":
+        label_x, label_ha = graph_bbox[0] + label_loc[0] * graph_w, "left"
     else:
-        label_x = grad_x0 + 0.5 * grad_w
-        if label_sign > 0:
-            label_offset = tick_len + label_gap if label_sign == tick_sign else label_gap_opposite
-            label_y = grad_y0 + grad_h + label_offset
-            label_va = "top"
-        else:
-            label_offset = tick_len + label_gap if label_sign == tick_sign else label_gap_opposite
-            label_y = grad_y0 - label_offset
-            label_va = "bottom"
-        scale_ax.text(
-            label_x,
-            label_y,
-            label,
-            transform=rot,
-            rotation=text_angle_deg,
-            rotation_mode="anchor",
-            ha="center",
-            va=label_va,
-            fontsize=fontsize,
-            clip_on=False,
-            zorder=5,
-        )
+        label_x, label_ha = graph_bbox[2] + label_loc[0] * graph_w, "right"
+    ax._rotated_scale_label_text = ax.text2D(
+        label_x,
+        graph_bbox[3] + label_loc[1] * graph_h,
+        label,
+        transform=ax.transAxes,
+        rotation=label_graph_rotation,
+        rotation_mode="anchor",
+        ha=label_ha,
+        va="top",
+        fontsize=fontsize,
+        color=scale_color,
+    )
     return scale_ax
 
 
@@ -975,7 +1003,7 @@ def _format_custom_z_label(label, y_value):
     return [label], y_value
 
 
-def _position_3d_z_label_top(ax, label, x=1.02, y=1.01, fontsize=IEEE_FONTSIZE, rotation_deg=0):
+def _position_3d_z_label_top(ax, label, x=1.05, y=1.05, fontsize=IEEE_FONTSIZE, rotation_deg=0):
     """Draw a controllable z-label near the top of the z-axis using axes coordinates."""
     _clear_custom_z_label(ax)
     label_lines, y_pos = _format_custom_z_label(label, y)
@@ -992,9 +1020,10 @@ def _position_3d_z_label_top(ax, label, x=1.02, y=1.01, fontsize=IEEE_FONTSIZE, 
                 transform=ax.transAxes,
                 rotation=rotation_deg,
                 rotation_mode="anchor",
-                ha="left",
-                va="top",
+                ha="center",
+                va="bottom",
                 fontsize=fontsize,
+                color=DEBUG_3D_TEXT_COLOR if DEBUG_DARK_3D_BACKGROUND else "black",
             )
         )
     ax._custom_zlabel_text = text_items
@@ -1028,6 +1057,9 @@ def _plot_3d_scatter_panel(
     tickpad=0.0,
     z_label_coords=None,
     z_label_rotation=0,
+    view_elev=27,
+    view_azim=-61,
+    box_aspect=(1.0, 1.0, 0.90),
 ):
     """Render one reusable 3D scatter panel inside a combined figure."""
     if not points:
@@ -1065,6 +1097,11 @@ def _plot_3d_scatter_panel(
         vmin=rssi_min,
         vmax=rssi_max,
     )
+    ax.view_init(elev=view_elev, azim=view_azim)
+    try:
+        ax.set_box_aspect(box_aspect)
+    except Exception:
+        pass
     ax.set_xlabel(labels[x_axis], fontsize=IEEE_FONTSIZE, labelpad=label_pads["x"])
     ax.set_ylabel(labels[y_axis], fontsize=IEEE_FONTSIZE, labelpad=label_pads["y"])
     if z_label_coords is None:
@@ -1104,6 +1141,7 @@ def _plot_3d_scatter_panel(
         ax.invert_xaxis()
     if invert_y:
         ax.invert_yaxis()
+    _apply_dark_3d_debug_theme(ax)
     return sc
 
 
@@ -1145,6 +1183,8 @@ def plot_rssi_3d(records, output_png, x_axis, y_axis, z_axis, invert_x=False, in
         float(sc.norm.vmin),
         float(sc.norm.vmax),
         r"RSSI (avg) (dBm)",
+        scale_graph_side="left",
+        label_graph_side="right",
     )
     png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
@@ -1266,7 +1306,7 @@ def plot_rssi_config_distance_energy_3d(records, output_png):
     print(f"Saved: {pdf_path}")
 
 
-def plot_rssi_3d_combined(records, output_png):
+def plot_rssi_3d_combined(records, output_png, scale_graph_side="left", label_graph_side="right"):
     """Three 3D subplots in one 2-column figure: A) BW-distance-SF, B) TP-distance-SF, C) TP-distance-BW."""
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
     distances = sorted(set(d for d, _, _, _, _ in records))
@@ -1292,7 +1332,7 @@ def plot_rssi_3d_combined(records, output_png):
     scatter_handles = []
     for idx, (x_axis, y_axis, z_axis, inv_x, inv_y, points) in enumerate(panel_points):
         ax = fig.add_subplot(1, 3, idx + 1, projection="3d")
-        z_label_coords = (0.98, 0.84) if idx == len(panel_points) - 1 else (1.0, 0.84)
+        z_label_coords = (1.00, 0.84) if idx == len(panel_points) - 1 else (1.02, 0.84)
         sc = _plot_3d_scatter_panel(
             ax,
             points,
@@ -1323,10 +1363,8 @@ def plot_rssi_3d_combined(records, output_png):
             float(sc.norm.vmax),
             label=r"RSSI (dBm)",
             fontsize=IEEE_FONTSIZE,
-            tick_side="outside",
-            label_side="tick_side",
-            scale_graph_side="right",
-            label_graph_side="left",
+            scale_graph_side=scale_graph_side,
+            label_graph_side=label_graph_side,
         )
     png_path, pdf_path = save_plot_outputs(fig, output_png, dpi=SAVE_DPI, bbox_inches="tight")
     plt.close()
@@ -1358,6 +1396,12 @@ def main():
     agg_records = aggregate_rssi_by_distance_sf_bw(records)
 
     plot_rssi_3d_combined(records, os.path.join(args.output_dir, "raw_rssi_3d_combined.png"))
+    plot_rssi_3d_combined(
+        records,
+        os.path.join(args.output_dir, "raw_rssi_3d_combined_right_left.png"),
+        scale_graph_side="right",
+        label_graph_side="left",
+    )
     plot_rssi_distance_sfbw_surface(agg_records, os.path.join(args.output_dir, "raw_rssi_distance_sfbw_surface.png"))
     plot_rssi_distance_signal_tradeoff_surfaces(
         agg_records,
